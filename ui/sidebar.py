@@ -16,16 +16,4 @@ def render_sidebar():
 
 
 
-        # Status des cles API
-        st.markdown("<div style='margin-top: 5rem;'>", unsafe_allow_html=True)
-        
-        gkey = config.ANTHROPIC_API_KEY
-        bkey = config.BREVO_API_KEY
 
-        def status_html(ok, label):
-            cls = "#00f2fe" if ok else "#ef4444"
-            return f'<div style="margin-bottom: 5px; font-size: 0.8rem;"><span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:{cls}; margin-right:6px;"></span> {label}</div>'
-
-        st.markdown(status_html(bool(gkey), "Claude API (LangGraph)"), unsafe_allow_html=True)
-        st.markdown(status_html(bool(bkey), "Brevo API"), unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
