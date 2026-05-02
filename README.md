@@ -13,7 +13,7 @@ Dossier principal : orchestrator/
 - app.py (le front Streamlit)
 - orchestrator.py (le cerveau qui route)
 - agents/ (le dossier avec les scripts des agents)
-- documents/ (là où vont tes PDF)
+- documents/ (là où vont les PDF)
 - chroma_db/ (la base de données pour le RAG)
 - .env.example (le modèle pour tes clés)
 - requirements.txt (les librairies a installer)
