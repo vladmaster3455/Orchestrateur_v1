@@ -22,7 +22,7 @@ Dossier principal : orchestrator/
 
 ## Les API Keys (Free tier)
 
-1. LLM API : Go sur AI Studio pour chopper la `GOOGLE_API_KEY`. au liue de llama3 en local
+1. LLM API : ou download LLM en local ou Go sur AI Studio pour chopper la `GOOGLE_API_KEY`. au liue de llama3 en local
 2. Twilio : Crée un compte trial pour WhatsApp (récupère le SID et le TOKEN).
 3. Resend ,Brevo: Pour les emails. Crée une clé sur leur site.
 
