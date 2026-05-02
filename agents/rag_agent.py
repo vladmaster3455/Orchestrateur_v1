@@ -14,6 +14,25 @@ CHROMA_DIR.mkdir(exist_ok=True)
 _index = None  # Cache de l'index en session
 
 
+def _anthropic_model_candidates() -> list[str]:
+    """Return preferred Anthropic models with safe fallbacks."""
+    preferred = os.getenv("ANTHROPIC_MODEL", "").strip()
+    candidates = [preferred] if preferred else []
+    candidates.extend([
+        "claude-haiku-4-5",
+        "claude-3-5-haiku-latest",
+        "claude-3-5-sonnet-latest",
+    ])
+    # Keep order while removing empty/duplicates.
+    seen = set()
+    unique = []
+    for model in candidates:
+        if model and model not in seen:
+            seen.add(model)
+            unique.append(model)
+    return unique
+
+
 def _get_embed_model():
     """Charge le modele d'embeddings local (sentence-transformers)."""
     from llama_index.embeddings.huggingface import HuggingFaceEmbedding
@@ -23,7 +42,7 @@ def _get_embed_model():
 def _get_llm():
     """Retourne le LLM Anthropic pour LlamaIndex."""
     from llama_index.llms.anthropic import Anthropic
-    return Anthropic(api_key=config.ANTHROPIC_API_KEY, model="claude-3-5-haiku-20241022")
+    return Anthropic(api_key=config.ANTHROPIC_API_KEY, model=_anthropic_model_candidates()[0])
 
 def _extract_text_via_vision(file_path: str) -> str:
     """Extrait le texte via lecture standard ou via Claude Vision (OCR) pour les scans/images."""
@@ -40,18 +59,25 @@ def _extract_text_via_vision(file_path: str) -> str:
     
     def ocr_image_bytes(img_bytes, media_type):
         b64_data = base64.b64encode(img_bytes).decode("utf-8")
-        message = client.messages.create(
-            model="claude-3-5-haiku-20241022",
-            max_tokens=4096,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64_data}},
-                    {"type": "text", "text": "Extrais tout le texte de cette image avec précision. S'il n'y a pas de texte, réponds simplement '[AUCUN TEXTE]'. Ne rajoute aucun commentaire."}
-                ],
-            }]
-        )
-        return message.content[0].text
+        last_error = None
+        for model_name in _anthropic_model_candidates():
+            try:
+                message = client.messages.create(
+                    model=model_name,
+                    max_tokens=4096,
+                    messages=[{
+                        "role": "user",
+                        "content": [
+                            {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64_data}},
+                            {"type": "text", "text": "Extrais tout le texte de cette image avec précision. S'il n'y a pas de texte, réponds simplement '[AUCUN TEXTE]'. Ne rajoute aucun commentaire."}
+                        ],
+                    }]
+                )
+                return message.content[0].text
+            except Exception as e:
+                last_error = e
+                continue
+        raise RuntimeError(f"OCR indisponible pour tous les modeles Anthropic configures: {last_error}")
 
     if ext in [".png", ".jpg", ".jpeg"]:
         media_type = "image/jpeg" if ext in [".jpg", ".jpeg"] else "image/png"
@@ -125,7 +151,11 @@ def build_index_from_file(file_path: str) -> dict:
             )
         }
     except Exception as e:
-        return {"success": False, "error": f"Erreur lors de l'indexation : {str(e)}"}
+        print(f"[RAG][build_index_from_file] {e}")
+        return {
+            "success": False,
+            "error": "Le document n'a pas pu etre indexe pour le moment. Verifiez la cle API ou reessayez dans quelques instants.",
+        }
 
 
 def load_existing_index() -> bool:
@@ -177,7 +207,8 @@ def query_document(question: str) -> str:
         response     = query_engine.query(prompt)
         return f"**Reponse RAG :**\n\n{str(response)}"
     except Exception as e:
-        return f"Erreur lors de la recherche : {str(e)}"
+        print(f"[RAG][query_document] {e}")
+        return "Je n'arrive pas a interroger le document pour le moment. Reessayez dans quelques instants."
 
 
 def reset_index() -> str:
