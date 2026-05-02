@@ -47,9 +47,12 @@ def inject_styles():
         border: none !important;
         color: white !important;
         border-radius: 20px !important;
-        font-weight: 600 !important;
+        font-weight: 700 !important;
         box-shadow: 0 4px 15px rgba(0, 210, 255, 0.4) !important;
         transition: all 0.3s ease !important;
+      }
+      button[kind="primary"] * {
+        color: #ffffff !important;
       }
       button[kind="primary"]:hover {
         box-shadow: 0 6px 20px rgba(0, 210, 255, 0.6) !important;

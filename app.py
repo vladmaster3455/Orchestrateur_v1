@@ -78,7 +78,7 @@ for msg in st.session_state.messages:
 
 # Afficher l'indicateur de document actif
 if st.session_state.indexed_file:
-    st.caption(f"📄 **Document actif :** {st.session_state.indexed_file}")
+    st.caption(f"**Document actif :** {st.session_state.indexed_file}")
 
 # --- Input utilisateur -------------------------------------------------------
 prompt = st.chat_input("Message Ai Chat...", accept_file=True, file_type=["pdf", "txt", "png", "jpg", "jpeg"])

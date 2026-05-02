@@ -3,6 +3,9 @@ import shutil
 from pathlib import Path
 from config import config
 
+# Compatibility fix for generated protobuf classes in some transitive deps.
+os.environ.setdefault("PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION", "python")
+
 DOCUMENTS_DIR = Path("documents")
 CHROMA_DIR    = Path("chroma_db")
 DOCUMENTS_DIR.mkdir(exist_ok=True)
