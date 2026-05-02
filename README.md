@@ -4,8 +4,8 @@ Projet d'orchestrateur multi-agents en Python pour mon Master. C'est fait pour t
 
 ## C'est quoi le projet ?
 
-En gros, c'est un "cerveau" central (Gemini 1.5 Flash) qui reçoit ton message et décide quel agent doit bosser. 
-Il y a 4 agents : WhatsApp, Email, RAG (pour tes docs) et un Chat normal.
+En gros, c'est un "cerveau" central  qui reçoit ton message et décide quel agent doit bosser. 
+Il y a 4 agents : WhatsApp, Email, RAG (pour tes docs) et un Chat normal et dautre en cours .
 
 ## Structure du projet
 
