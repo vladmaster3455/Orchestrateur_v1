@@ -1,4 +1,5 @@
 import streamlit as st
+import re
 from pathlib import Path
 from config import config
 from ui.styles import inject_styles
@@ -34,6 +35,26 @@ if "next_history_id" not in st.session_state:
     st.session_state.next_history_id = 1
 if "pending_action" not in st.session_state:
     st.session_state.pending_action = None
+if "active_agent" not in st.session_state:
+    st.session_state.active_agent = "CHAT"
+
+
+SYMBOL_FILTER_PATTERN = re.compile(
+    "["
+    "\U0001F300-\U0001F5FF"
+    "\U0001F600-\U0001F64F"
+    "\U0001F680-\U0001F6FF"
+    "\U0001F900-\U0001F9FF"
+    "\U0001FA70-\U0001FAFF"
+    "\u2600-\u26FF"
+    "\u2700-\u27BF"
+    "]",
+    flags=re.UNICODE,
+)
+
+
+def sanitize_text(text: str) -> str:
+    return SYMBOL_FILTER_PATTERN.sub("", text or "").strip()
 
 def save_current_conversation():
     if not st.session_state.messages:
@@ -82,6 +103,8 @@ if history_to_load is not None:
 col1, col2, col3 = st.columns(3)
 with col1:
     if st.button("Agent Email", use_container_width=True, type="secondary", key="agent_email_shortcut"):
+        st.session_state.active_agent = "EMAIL"
+        st.session_state.pending_action = {"agent": "EMAIL", "context": {}}
         st.session_state.messages.append({
             "role": "assistant",
             "content": "**Agent Email**\nJe suis specialise dans la redaction et l'envoi de courriers electroniques. Donnez-moi l'adresse du destinataire et le contexte de votre message, et je me chargerai de rediger un email professionnel et de l'envoyer pour vous.\n\n*Essayez : \"Envoie un email a direction@entreprise.com pour demander une reunion demain.\"*",
@@ -90,6 +113,8 @@ with col1:
         st.rerun()
 with col2:
     if st.button("Agent RAG", use_container_width=True, type="secondary", key="agent_rag_shortcut"):
+        st.session_state.active_agent = "RAG"
+        st.session_state.pending_action = {"agent": "RAG", "context": {}}
         st.session_state.messages.append({
             "role": "assistant",
             "content": "**Agent RAG (Analyse Documentaire)**\nJe peux lire, comprendre et analyser vos documents (PDF, images, textes). Telechargez un fichier via le trombone dans la barre de saisie, puis posez-moi n'importe quelle question sur son contenu. Je chercherai intelligemment la reponse dans vos donnees.\n\n*Essayez d'uploader un PDF puis demandez : \"Fais-moi un resume des 3 points cles de ce document.\"*",
@@ -98,6 +123,8 @@ with col2:
         st.rerun()
 with col3:
     if st.button("Agent Chat", use_container_width=True, type="secondary", key="agent_chat_shortcut"):
+        st.session_state.active_agent = "CHAT"
+        st.session_state.pending_action = None
         st.session_state.messages.append({
             "role": "assistant",
             "content": "**Agent Chat**\nJe suis le cerveau principal de l'Orchestrateur. Je suis la pour discuter, repondre a vos questions generales, faire de la traduction ou de la redaction, et surtout, comprendre vos intentions pour passer le relais aux autres agents si necessaire.\n\n*Essayez : \"Explique-moi comment fonctionne l'architecture LangGraph.\"*",
@@ -115,14 +142,15 @@ if len(st.session_state.messages) == 0:
 # --- Historique du chat ------------------------------------------------------
 for msg in st.session_state.messages:
     role = msg["role"]
+    msg_content = sanitize_text(msg.get("content", ""))
     with st.chat_message(role):
         if role == "user":
-            st.markdown(f'<span class="user-msg-marker"></span>\n\n{msg["content"]}', unsafe_allow_html=True)
+            st.markdown(f'<span class="user-msg-marker"></span>\n\n{msg_content}', unsafe_allow_html=True)
         else:
             agent_badge = ""
             if "agent" in msg and msg["agent"] != "CHAT":
                 agent_badge = f'<span class="agent-badge">Agent {msg["agent"]}</span><br><br>'
-            st.markdown(f'<span class="assistant-msg-marker"></span>\n\n{agent_badge}{msg["content"]}', unsafe_allow_html=True)
+            st.markdown(f'<span class="assistant-msg-marker"></span>\n\n{agent_badge}{msg_content}', unsafe_allow_html=True)
 
 # --- Input utilisateur -------------------------------------------------------
 prompt = st.chat_input("Message Ai Chat...", accept_file=True, file_type=["pdf", "txt", "png", "jpg", "jpeg"])
@@ -144,6 +172,19 @@ elif prompt:
         user_text = str(prompt)
 
 if user_text or uploaded_files:
+    user_text = sanitize_text(user_text)
+
+    lower_text = user_text.lower()
+    if "agent rag" in lower_text:
+        st.session_state.active_agent = "RAG"
+        st.session_state.pending_action = {"agent": "RAG", "context": {}}
+    elif "agent email" in lower_text or "agent mail" in lower_text:
+        st.session_state.active_agent = "EMAIL"
+        st.session_state.pending_action = {"agent": "EMAIL", "context": {}}
+    elif "agent chat" in lower_text:
+        st.session_state.active_agent = "CHAT"
+        st.session_state.pending_action = None
+
     if uploaded_files:
         uploaded = uploaded_files[0]
         docs_dir = Path("documents")
@@ -165,9 +206,10 @@ if user_text or uploaded_files:
                 if pending and pending.get("agent") == "RAG":
                     follow_up = continue_pending_rag("", pending.get("context", {}))
                     st.session_state.pending_action = follow_up.get("pending_action")
+                    st.session_state.active_agent = "RAG"
                     st.session_state.messages.append({
                         "role": "assistant",
-                        "content": follow_up.get("response", ""),
+                        "content": sanitize_text(follow_up.get("response", "")),
                         "agent": "RAG",
                     })
             else:
@@ -192,14 +234,20 @@ if user_text or uploaded_files:
                     result = continue_pending_email(user_text, pending.get("context", {}))
                 elif pending and pending.get("agent") == "RAG":
                     result = continue_pending_rag(user_text, pending.get("context", {}))
+                elif st.session_state.active_agent == "EMAIL":
+                    result = continue_pending_email(user_text, {})
+                elif st.session_state.active_agent == "RAG":
+                    result = continue_pending_rag(user_text, {})
                 else:
                     history = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages[:-1]]
                     result = route(user_text, history)
             
             agent         = result["agent"]
-            response_text = result["response"]
+            response_text = sanitize_text(result["response"])
             explanation   = result.get("explanation", "")
             st.session_state.pending_action = result.get("pending_action")
+            if agent in ["EMAIL", "RAG", "CHAT"]:
+                st.session_state.active_agent = agent
 
             agent_badge = ""
             if agent != "CHAT":
