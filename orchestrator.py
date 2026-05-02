@@ -6,6 +6,7 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from pydantic import BaseModel, Field
 
 from config import config
+from agents import EmailAgent, RAGAgent, ChatAgent, AgentRegistry
 
 # --- Define State ---
 class AgentState(TypedDict):
@@ -36,6 +37,10 @@ class RouteOutput(BaseModel):
 # Instance globale pour la rapidité
 llm = ChatAnthropic(model="claude-haiku-4-5", api_key=config.ANTHROPIC_API_KEY)
 router_llm = llm.with_structured_output(RouteOutput)
+agent_registry = AgentRegistry()
+agent_registry.register(EmailAgent())
+agent_registry.register(RAGAgent())
+agent_registry.register(ChatAgent())
 
 # --- Nœuds (Nodes) ---
 def router_node(state: AgentState):
@@ -60,32 +65,32 @@ def router_node(state: AgentState):
     return {"selected_agent": res.agent, "extracted_params": res.extracted}
 
 def email_node(state: AgentState):
-    from agents.email_agent import run
-    res = run(state["extracted_params"])
+    agent = agent_registry.get("EMAIL")
+    res = agent.run(state["extracted_params"]) if agent else "Agent EMAIL indisponible."
     return {
         "final_response": res,
         "explanation": f"L'agent EMAIL a été déclenché (LangGraph) avec les paramètres : {state['extracted_params']}"
     }
 
 def rag_node(state: AgentState):
-    from agents.rag_agent import run
-    res = run(state["extracted_params"])
+    agent = agent_registry.get("RAG")
+    res = agent.run(state["extracted_params"]) if agent else "Agent RAG indisponible."
     return {
         "final_response": res,
         "explanation": "L'agent RAG a cherché la réponse dans votre document (via LangGraph)."
     }
 
 def chat_node(state: AgentState):
-    messages = [SystemMessage(content="Tu es OrchestrateurSENGHOR, un assistant IA poli et tres intelligent. Reponds toujours en texte simple et professionnel.")]
-    for msg in state.get("history", []):
-        if msg["role"] == "user":
-            messages.append(HumanMessage(content=msg["content"]))
-        else:
-            messages.append(AIMessage(content=msg["content"]))
-            
-    messages.append(HumanMessage(content=state["current_prompt"]))
-    res = llm.invoke(messages)
-    return {"final_response": res.content, "explanation": ""}
+    agent = agent_registry.get("CHAT")
+    if agent:
+        res = agent.run(
+            {"prompt": state["current_prompt"]},
+            llm=llm,
+            history=state.get("history", []),
+        )
+    else:
+        res = "Agent CHAT indisponible."
+    return {"final_response": res, "explanation": ""}
 
 # --- Routage Conditionnel (Edges) ---
 def decide_route(state: AgentState):

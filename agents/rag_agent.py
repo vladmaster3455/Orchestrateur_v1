@@ -2,6 +2,7 @@ import os
 import shutil
 from pathlib import Path
 from config import config
+from .base_agent import BaseAgent
 
 # Compatibility fix for generated protobuf classes in some transitive deps.
 os.environ.setdefault("PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION", "python")
@@ -227,9 +228,20 @@ def reset_index() -> str:
         return f"Erreur lors de la reinitialisation : {str(e)}"
 
 
+class RAGAgent(BaseAgent):
+    name = "RAG"
+    description = "Agent de question-reponse base sur vos documents indexes."
+
+    def run(self, extracted: dict, **kwargs) -> str:
+        question = extracted.get("question", "")
+        if not question:
+            return "Question introuvable dans votre message."
+        return query_document(question)
+
+
+_rag_agent = RAGAgent()
+
+
 def run(extracted: dict) -> str:
-    """Point d'entree de l'agent RAG."""
-    question = extracted.get("question", "")
-    if not question:
-        return "Question introuvable dans votre message."
-    return query_document(question)
+    """Backward-compatible wrapper."""
+    return _rag_agent.run(extracted)
