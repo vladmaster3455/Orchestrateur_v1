@@ -1,5 +1,6 @@
 import streamlit as st
 import re
+import streamlit.components.v1 as components
 from pathlib import Path
 from config import config
 from ui.styles import inject_styles
@@ -56,6 +57,36 @@ SYMBOL_FILTER_PATTERN = re.compile(
 def sanitize_text(text: str) -> str:
     return SYMBOL_FILTER_PATTERN.sub("", text or "").strip()
 
+
+def detect_agent_switch(text: str) -> str | None:
+    lowered = (text or "").lower()
+    if re.search(r"\b(a?g?e?n?t|agant)\b.*\b(rag)\b", lowered):
+        return "RAG"
+    if re.search(r"\b(a?g?e?n?t|agant)\b.*\b(email|mail)\b", lowered):
+        return "EMAIL"
+    if re.search(r"\b(a?g?e?n?t|agant)\b.*\b(chat)\b", lowered):
+        return "CHAT"
+    return None
+
+
+def scroll_to_bottom():
+    components.html(
+        """
+        <script>
+        const scrollNow = () => {
+            const main = window.parent.document.querySelector('section.main');
+            if (main) {
+                main.scrollTo({ top: main.scrollHeight, behavior: 'smooth' });
+            }
+            window.parent.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+        };
+        setTimeout(scrollNow, 50);
+        setTimeout(scrollNow, 250);
+        </script>
+        """,
+        height=0,
+    )
+
 def save_current_conversation():
     if not st.session_state.messages:
         return
@@ -110,6 +141,7 @@ with col1:
             "content": "**Agent Email**\nJe suis specialise dans la redaction et l'envoi de courriers electroniques. Donnez-moi l'adresse du destinataire et le contexte de votre message, et je me chargerai de rediger un email professionnel et de l'envoyer pour vous.\n\n*Essayez : \"Envoie un email a direction@entreprise.com pour demander une reunion demain.\"*",
             "agent": "EMAIL"
         })
+        scroll_to_bottom()
         st.rerun()
 with col2:
     if st.button("Agent RAG", use_container_width=True, type="secondary", key="agent_rag_shortcut"):
@@ -120,6 +152,7 @@ with col2:
             "content": "**Agent RAG (Analyse Documentaire)**\nJe peux lire, comprendre et analyser vos documents (PDF, images, textes). Telechargez un fichier via le trombone dans la barre de saisie, puis posez-moi n'importe quelle question sur son contenu. Je chercherai intelligemment la reponse dans vos donnees.\n\n*Essayez d'uploader un PDF puis demandez : \"Fais-moi un resume des 3 points cles de ce document.\"*",
             "agent": "RAG"
         })
+        scroll_to_bottom()
         st.rerun()
 with col3:
     if st.button("Agent Chat", use_container_width=True, type="secondary", key="agent_chat_shortcut"):
@@ -130,6 +163,7 @@ with col3:
             "content": "**Agent Chat**\nJe suis le cerveau principal de l'Orchestrateur. Je suis la pour discuter, repondre a vos questions generales, faire de la traduction ou de la redaction, et surtout, comprendre vos intentions pour passer le relais aux autres agents si necessaire.\n\n*Essayez : \"Explique-moi comment fonctionne l'architecture LangGraph.\"*",
             "agent": "CHAT"
         })
+        scroll_to_bottom()
         st.rerun()
 
 # --- Main Empty State (AIVerse Style) ----------------------------------------
@@ -174,14 +208,14 @@ elif prompt:
 if user_text or uploaded_files:
     user_text = sanitize_text(user_text)
 
-    lower_text = user_text.lower()
-    if "agent rag" in lower_text:
+    switch_target = detect_agent_switch(user_text)
+    if switch_target == "RAG":
         st.session_state.active_agent = "RAG"
         st.session_state.pending_action = {"agent": "RAG", "context": {}}
-    elif "agent email" in lower_text or "agent mail" in lower_text:
+    elif switch_target == "EMAIL":
         st.session_state.active_agent = "EMAIL"
         st.session_state.pending_action = {"agent": "EMAIL", "context": {}}
-    elif "agent chat" in lower_text:
+    elif switch_target == "CHAT":
         st.session_state.active_agent = "CHAT"
         st.session_state.pending_action = None
 
@@ -254,6 +288,7 @@ if user_text or uploaded_files:
                 agent_badge = f'<span class="agent-badge">Agent {agent}</span><br><br>'
 
             st.markdown(f'<span class="assistant-msg-marker"></span>\n\n{agent_badge}{response_text}', unsafe_allow_html=True)
+            scroll_to_bottom()
 
     st.session_state.messages.append({
         "role":    "assistant",
