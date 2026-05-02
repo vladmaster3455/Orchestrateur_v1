@@ -76,7 +76,7 @@ def rag_node(state: AgentState):
     }
 
 def chat_node(state: AgentState):
-    messages = [SystemMessage(content="Tu es OrchestrateurSENGHOR, un assistant IA poli et très intelligent. Ne réponds jamais avec des emojis.")]
+    messages = [SystemMessage(content="Tu es OrchestrateurSENGHOR, un assistant IA poli et tres intelligent. Reponds toujours en texte simple et professionnel.")]
     for msg in state.get("history", []):
         if msg["role"] == "user":
             messages.append(HumanMessage(content=msg["content"]))
