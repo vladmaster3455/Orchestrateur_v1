@@ -7,11 +7,6 @@ def render_sidebar():
         st.markdown("<br>", unsafe_allow_html=True)
 
         new_chat_clicked = st.button("Nouvelle Discussion", use_container_width=True, type="primary")
-        close_document_clicked = st.button(
-            "Fermer le document",
-            use_container_width=True,
-            disabled=not bool(st.session_state.get("indexed_file")),
-        )
 
         st.markdown("<br>", unsafe_allow_html=True)
         st.text_input("Rechercher", placeholder="Rechercher...", label_visibility="collapsed")
@@ -28,7 +23,6 @@ def render_sidebar():
 
     return {
         "new_chat": new_chat_clicked,
-        "close_document": close_document_clicked,
         "load_history_id": selected_history_id,
     }
 

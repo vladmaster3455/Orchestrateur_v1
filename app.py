@@ -57,16 +57,12 @@ def save_current_conversation():
 sidebar_actions = render_sidebar()
 
 if sidebar_actions.get("new_chat"):
+    from agents.rag_agent import reset_index
     save_current_conversation()
+    reset_index()
     st.session_state.messages = []
     st.session_state.indexed_file = None
     st.session_state.suggestion_prompt = None
-    st.rerun()
-
-if sidebar_actions.get("close_document"):
-    from agents.rag_agent import reset_index
-    reset_index()
-    st.session_state.indexed_file = None
     st.rerun()
 
 history_to_load = sidebar_actions.get("load_history_id")
@@ -122,10 +118,6 @@ for msg in st.session_state.messages:
             if "agent" in msg and msg["agent"] != "CHAT":
                 agent_badge = f'<span class="agent-badge">Agent {msg["agent"]}</span><br><br>'
             st.markdown(f'<span class="assistant-msg-marker"></span>\n\n{agent_badge}{msg["content"]}', unsafe_allow_html=True)
-
-# Afficher l'indicateur de document actif
-if st.session_state.indexed_file:
-    st.caption(f"**Document actif :** {st.session_state.indexed_file}")
 
 # --- Input utilisateur -------------------------------------------------------
 prompt = st.chat_input("Message Ai Chat...", accept_file=True, file_type=["pdf", "txt", "png", "jpg", "jpeg"])
