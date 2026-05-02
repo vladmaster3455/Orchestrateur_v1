@@ -3,7 +3,7 @@ from pathlib import Path
 from config import config
 from ui.styles import inject_styles
 from ui.sidebar import render_sidebar
-from orchestrator import route  # Import moved to top to prevent cold start latency
+from orchestrator import route, continue_pending_email, continue_pending_rag  # Import moved to top to prevent cold start latency
 
 # --- Page config -------------------------------------------------------------
 st.set_page_config(
@@ -32,6 +32,8 @@ if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "next_history_id" not in st.session_state:
     st.session_state.next_history_id = 1
+if "pending_action" not in st.session_state:
+    st.session_state.pending_action = None
 
 def save_current_conversation():
     if not st.session_state.messages:
@@ -50,6 +52,7 @@ def save_current_conversation():
         "title": title,
         "messages": [dict(m) for m in st.session_state.messages],
         "indexed_file": st.session_state.indexed_file,
+        "pending_action": st.session_state.pending_action,
     })
     st.session_state.next_history_id += 1
 
@@ -63,6 +66,7 @@ if sidebar_actions.get("new_chat"):
     st.session_state.messages = []
     st.session_state.indexed_file = None
     st.session_state.suggestion_prompt = None
+    st.session_state.pending_action = None
     st.rerun()
 
 history_to_load = sidebar_actions.get("load_history_id")
@@ -71,6 +75,7 @@ if history_to_load is not None:
     if selected:
         st.session_state.messages = [dict(m) for m in selected.get("messages", [])]
         st.session_state.indexed_file = selected.get("indexed_file")
+        st.session_state.pending_action = selected.get("pending_action")
         st.rerun()
 
 # --- Agent shortcuts ----------------------------------------------------------
@@ -156,6 +161,15 @@ if user_text or uploaded_files:
                     "content": result["response"],
                     "agent": "RAG"
                 })
+                pending = st.session_state.pending_action
+                if pending and pending.get("agent") == "RAG":
+                    follow_up = continue_pending_rag("", pending.get("context", {}))
+                    st.session_state.pending_action = follow_up.get("pending_action")
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": follow_up.get("response", ""),
+                        "agent": "RAG",
+                    })
             else:
                 st.error(result["error"])
                 st.stop()
@@ -173,12 +187,19 @@ if user_text or uploaded_files:
             st.error("**Erreur : ANTHROPIC_API_KEY non configurée.**")
         else:
             with st.spinner("Traitement via LangGraph..."):
-                history = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages[:-1]]
-                result = route(user_text, history)
+                pending = st.session_state.pending_action
+                if pending and pending.get("agent") == "EMAIL":
+                    result = continue_pending_email(user_text, pending.get("context", {}))
+                elif pending and pending.get("agent") == "RAG":
+                    result = continue_pending_rag(user_text, pending.get("context", {}))
+                else:
+                    history = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages[:-1]]
+                    result = route(user_text, history)
             
             agent         = result["agent"]
             response_text = result["response"]
             explanation   = result.get("explanation", "")
+            st.session_state.pending_action = result.get("pending_action")
 
             agent_badge = ""
             if agent != "CHAT":

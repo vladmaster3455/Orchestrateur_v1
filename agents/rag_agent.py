@@ -232,11 +232,38 @@ class RAGAgent(BaseAgent):
     name = "RAG"
     description = "Agent de question-reponse base sur vos documents indexes."
 
-    def run(self, extracted: dict, **kwargs) -> str:
-        question = extracted.get("question", "")
+    def run(self, extracted: dict, **kwargs) -> dict:
+        question = (extracted.get("question", "") or kwargs.get("user_text", "")).strip()
+        pending_context = kwargs.get("pending_context") or {}
         if not question:
-            return "Question introuvable dans votre message."
-        return query_document(question)
+            question = (pending_context.get("question", "") or "").strip()
+        if not question:
+            return {
+                "status": "needs_input",
+                "response": "Je n'ai pas encore la question a poser sur le document. Peux-tu me la donner ?",
+                "context": pending_context,
+            }
+
+        has_index = _index is not None or load_existing_index()
+        if not has_index:
+            return {
+                "status": "needs_input",
+                "response": "Je n'ai pas encore de document indexe. Uploade un document, puis je reprendrai ta question automatiquement.",
+                "context": {"question": question},
+            }
+
+        answer = query_document(question)
+        if answer.startswith("Je n'arrive pas a interroger le document"):
+            return {
+                "status": "failed",
+                "response": "Je n'arrive pas a traiter ce document pour le moment. Reessayez dans quelques instants.",
+                "context": {"question": question},
+            }
+        return {
+            "status": "completed",
+            "response": answer,
+            "context": {"question": question},
+        }
 
 
 _rag_agent = RAGAgent()
@@ -244,4 +271,5 @@ _rag_agent = RAGAgent()
 
 def run(extracted: dict) -> str:
     """Backward-compatible wrapper."""
-    return _rag_agent.run(extracted)
+    result = _rag_agent.run(extracted)
+    return result.get("response", "Erreur lors du traitement RAG.")

@@ -16,6 +16,7 @@ class AgentState(TypedDict):
     extracted_params: dict
     final_response: str
     explanation: str
+    pending_action: dict
 
 # --- Output Model for Routing ---
 class RouteOutput(BaseModel):
@@ -66,18 +67,43 @@ def router_node(state: AgentState):
 
 def email_node(state: AgentState):
     agent = agent_registry.get("EMAIL")
-    res = agent.run(state["extracted_params"]) if agent else "Agent EMAIL indisponible."
+    if agent:
+        raw = agent.run(state["extracted_params"])
+        res = raw.get("response", "Erreur agent EMAIL.")
+        pending_action = None
+        if raw.get("status") == "needs_input":
+            pending_action = {
+                "agent": "EMAIL",
+                "context": raw.get("context", {}),
+                "missing_fields": raw.get("missing_fields", []),
+            }
+    else:
+        res = "Agent EMAIL indisponible."
+        pending_action = None
     return {
         "final_response": res,
-        "explanation": f"L'agent EMAIL a été déclenché (LangGraph) avec les paramètres : {state['extracted_params']}"
+        "explanation": f"L'agent EMAIL a été déclenché (LangGraph) avec les paramètres : {state['extracted_params']}",
+        "pending_action": pending_action,
     }
 
 def rag_node(state: AgentState):
     agent = agent_registry.get("RAG")
-    res = agent.run(state["extracted_params"]) if agent else "Agent RAG indisponible."
+    if agent:
+        raw = agent.run(state["extracted_params"])
+        res = raw.get("response", "Erreur agent RAG.")
+        pending_action = None
+        if raw.get("status") == "needs_input":
+            pending_action = {
+                "agent": "RAG",
+                "context": raw.get("context", {}),
+            }
+    else:
+        res = "Agent RAG indisponible."
+        pending_action = None
     return {
         "final_response": res,
-        "explanation": "L'agent RAG a cherché la réponse dans votre document (via LangGraph)."
+        "explanation": "L'agent RAG a cherché la réponse dans votre document (via LangGraph).",
+        "pending_action": pending_action,
     }
 
 def chat_node(state: AgentState):
@@ -128,7 +154,8 @@ def route(prompt: str, chat_history: list) -> dict:
         "selected_agent": "",
         "extracted_params": {},
         "final_response": "",
-        "explanation": ""
+        "explanation": "",
+        "pending_action": {}
     }
     
     try:
@@ -136,11 +163,58 @@ def route(prompt: str, chat_history: list) -> dict:
         return {
             "agent": final_state.get("selected_agent", "CHAT"),
             "response": final_state.get("final_response", "Erreur lors de la génération"),
-            "explanation": final_state.get("explanation", "")
+            "explanation": final_state.get("explanation", ""),
+            "pending_action": final_state.get("pending_action"),
         }
     except Exception as e:
         return {
             "agent": "ERROR",
             "response": f"Erreur de l'orchestrateur (LangGraph) : {str(e)}",
-            "explanation": ""
+            "explanation": "",
+            "pending_action": None,
         }
+
+
+def continue_pending_email(user_text: str, pending_context: dict) -> dict:
+    agent = agent_registry.get("EMAIL")
+    if not agent:
+        return {
+            "agent": "EMAIL",
+            "response": "Agent EMAIL indisponible.",
+            "pending_action": None,
+        }
+    raw = agent.run({}, user_text=user_text, pending_context=pending_context or {})
+    pending_action = None
+    if raw.get("status") == "needs_input":
+        pending_action = {
+            "agent": "EMAIL",
+            "context": raw.get("context", {}),
+            "missing_fields": raw.get("missing_fields", []),
+        }
+    return {
+        "agent": "EMAIL",
+        "response": raw.get("response", "Erreur agent EMAIL."),
+        "pending_action": pending_action,
+    }
+
+
+def continue_pending_rag(user_text: str, pending_context: dict) -> dict:
+    agent = agent_registry.get("RAG")
+    if not agent:
+        return {
+            "agent": "RAG",
+            "response": "Agent RAG indisponible.",
+            "pending_action": None,
+        }
+    raw = agent.run({}, user_text=user_text, pending_context=pending_context or {})
+    pending_action = None
+    if raw.get("status") == "needs_input":
+        pending_action = {
+            "agent": "RAG",
+            "context": raw.get("context", {}),
+        }
+    return {
+        "agent": "RAG",
+        "response": raw.get("response", "Erreur agent RAG."),
+        "pending_action": pending_action,
+    }
