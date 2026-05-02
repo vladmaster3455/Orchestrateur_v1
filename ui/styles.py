@@ -186,7 +186,6 @@ def inject_styles():
       /* Hide main menu and footer */
       #MainMenu {visibility: hidden;}
       footer {visibility: hidden;}
-      header {visibility: hidden;}
 
       /* --- Responsive Mobile Design --- */
       @media (max-width: 768px) {

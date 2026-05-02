@@ -28,9 +28,54 @@ if "indexed_file" not in st.session_state:
     st.session_state.indexed_file = None
 if "suggestion_prompt" not in st.session_state:
     st.session_state.suggestion_prompt = None
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+if "next_history_id" not in st.session_state:
+    st.session_state.next_history_id = 1
+
+def save_current_conversation():
+    if not st.session_state.messages:
+        return
+
+    first_user_message = next(
+        (m.get("content", "") for m in st.session_state.messages if m.get("role") == "user" and m.get("content")),
+        "",
+    )
+    title = first_user_message.strip()[:40] if first_user_message else "Conversation sans titre"
+    if not title:
+        title = "Conversation sans titre"
+
+    st.session_state.chat_history.append({
+        "id": st.session_state.next_history_id,
+        "title": title,
+        "messages": [dict(m) for m in st.session_state.messages],
+        "indexed_file": st.session_state.indexed_file,
+    })
+    st.session_state.next_history_id += 1
 
 # Render Sidebar
-render_sidebar()
+sidebar_actions = render_sidebar()
+
+if sidebar_actions.get("new_chat"):
+    save_current_conversation()
+    st.session_state.messages = []
+    st.session_state.indexed_file = None
+    st.session_state.suggestion_prompt = None
+    st.rerun()
+
+if sidebar_actions.get("close_document"):
+    from agents.rag_agent import reset_index
+    reset_index()
+    st.session_state.indexed_file = None
+    st.rerun()
+
+history_to_load = sidebar_actions.get("load_history_id")
+if history_to_load is not None:
+    selected = next((item for item in st.session_state.chat_history if item.get("id") == history_to_load), None)
+    if selected:
+        st.session_state.messages = [dict(m) for m in selected.get("messages", [])]
+        st.session_state.indexed_file = selected.get("indexed_file")
+        st.rerun()
 
 # --- Agent shortcuts ----------------------------------------------------------
 col1, col2, col3 = st.columns(3)
