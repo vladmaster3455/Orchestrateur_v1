@@ -32,36 +32,38 @@ if "suggestion_prompt" not in st.session_state:
 # Render Sidebar
 render_sidebar()
 
+# --- Agent shortcuts ----------------------------------------------------------
+col1, col2, col3 = st.columns(3)
+with col1:
+    if st.button("Agent Email", use_container_width=True, type="secondary", key="agent_email_shortcut"):
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": "**Agent Email**\nJe suis specialise dans la redaction et l'envoi de courriers electroniques. Donnez-moi l'adresse du destinataire et le contexte de votre message, et je me chargerai de rediger un email professionnel et de l'envoyer pour vous.\n\n*Essayez : \"Envoie un email a direction@entreprise.com pour demander une reunion demain.\"*",
+            "agent": "EMAIL"
+        })
+        st.rerun()
+with col2:
+    if st.button("Agent RAG", use_container_width=True, type="secondary", key="agent_rag_shortcut"):
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": "**Agent RAG (Analyse Documentaire)**\nJe peux lire, comprendre et analyser vos documents (PDF, images, textes). Telechargez un fichier via le trombone dans la barre de saisie, puis posez-moi n'importe quelle question sur son contenu. Je chercherai intelligemment la reponse dans vos donnees.\n\n*Essayez d'uploader un PDF puis demandez : \"Fais-moi un resume des 3 points cles de ce document.\"*",
+            "agent": "RAG"
+        })
+        st.rerun()
+with col3:
+    if st.button("Agent Chat", use_container_width=True, type="secondary", key="agent_chat_shortcut"):
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": "**Agent Chat**\nJe suis le cerveau principal de l'Orchestrateur. Je suis la pour discuter, repondre a vos questions generales, faire de la traduction ou de la redaction, et surtout, comprendre vos intentions pour passer le relais aux autres agents si necessaire.\n\n*Essayez : \"Explique-moi comment fonctionne l'architecture LangGraph.\"*",
+            "agent": "CHAT"
+        })
+        st.rerun()
+
 # --- Main Empty State (AIVerse Style) ----------------------------------------
 if len(st.session_state.messages) == 0:
     st.markdown('<div class="aiverse-header">Tous vos outils favoris au même endroit</div>', unsafe_allow_html=True)
     st.markdown('<div class="aiverse-subheader">Si aucune option n\'est sélectionnée, l\'orchestrateur LangGraph choisira automatiquement le meilleur agent en fonction de votre requête.</div>', unsafe_allow_html=True)
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Agent Email", use_container_width=True, type="secondary"):
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": "**Agent Email**\nJe suis spécialisé dans la rédaction et l'envoi de courriers électroniques. Donnez-moi l'adresse du destinataire et le contexte de votre message, et je me chargerai de rédiger un email professionnel et de l'envoyer pour vous.\n\n*Essayez : \"Envoie un email à direction@entreprise.com pour demander une réunion demain.\"*",
-                "agent": "EMAIL"
-            })
-            st.rerun()
-    with col2:
-        if st.button("Agent RAG", use_container_width=True, type="secondary"):
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": "**Agent RAG (Analyse Documentaire)**\nJe peux lire, comprendre et analyser vos documents (PDF, images, textes). Téléchargez un fichier via le trombone dans la barre de saisie, puis posez-moi n'importe quelle question sur son contenu. Je chercherai intelligemment la réponse dans vos données.\n\n*Essayez d'uploader un PDF puis demandez : \"Fais-moi un résumé des 3 points clés de ce document.\"*",
-                "agent": "RAG"
-            })
-            st.rerun()
-        if st.button("Agent Chat", use_container_width=True, type="secondary"):
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": "**Agent Chat**\nJe suis le cerveau principal de l'Orchestrateur. Je suis là pour discuter, répondre à vos questions générales, faire de la traduction ou de la rédaction, et surtout, comprendre vos intentions pour passer le relais aux autres agents si nécessaire.\n\n*Essayez : \"Explique-moi comment fonctionne l'architecture LangGraph.\"*",
-                "agent": "CHAT"
-            })
-            st.rerun()
-    
+
     st.markdown("<br><br>", unsafe_allow_html=True)
 
 # --- Historique du chat ------------------------------------------------------
