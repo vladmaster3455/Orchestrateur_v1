@@ -1,0 +1,11 @@
+# ─── Google Gemini ───────────────────────────────────────────────────────────
+GOOGLE_API_KEY=your_google_api_key_here
+
+# ─── Twilio (SMS) ─────────────────────────────────────────────────────────────
+TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWILIO_AUTH_TOKEN=your_auth_token_here
+TWILIO_FROM_NUMBER=+1xxxxxxxxxx
+
+# ─── Resend (Email) ───────────────────────────────────────────────────────────
+RESEND_API_KEY=re_xxxxxxxxxxxxxxxxxxxx
+EMAIL_FROM=onboarding@resend.dev
