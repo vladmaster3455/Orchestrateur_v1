@@ -1,4 +1,4 @@
-content = """# Multi-Agent Orchestrator — Stack 100% Free
+# Multi-Agent Orchestrator — Stack 100% Free
 
 Projet d'orchestrateur multi-agents en Python pour mon Master. C'est fait pour tourner sur **Streamlit Cloud** et c'est full gratuit (pas besoin de sortir la CB).
 
