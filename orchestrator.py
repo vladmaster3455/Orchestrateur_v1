@@ -6,7 +6,7 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from pydantic import BaseModel, Field
 
 from config import config
-from agents import EmailAgent, RAGAgent, ChatAgent, AgentRegistry
+from agents import EmailAgent, RAGAgent, AgentRegistry
 
 # --- Define State ---
 class AgentState(TypedDict):
@@ -20,7 +20,7 @@ class AgentState(TypedDict):
 
 # --- Output Model for Routing ---
 class RouteOutput(BaseModel):
-    agent: str = Field(description="Agent à utiliser (EMAIL, RAG, CHAT)")
+    agent: str = Field(description="Agent à utiliser (EMAIL, RAG ou autre)")
     extracted: dict = Field(description="Paramètres extraits selon l'agent choisi. Par exemple 'question' pour le RAG.")
 
 # ==============================================================================
@@ -41,16 +41,17 @@ router_llm = llm.with_structured_output(RouteOutput)
 agent_registry = AgentRegistry()
 agent_registry.register(EmailAgent())
 agent_registry.register(RAGAgent())
-agent_registry.register(ChatAgent())
 
 # --- Nœuds (Nodes) ---
 def router_node(state: AgentState):
     """Analyse l'intention et choisit le bon agent"""
     sys_prompt = """
     Tu es un routeur IA très intelligent. Choisis un agent parmi :
-    - EMAIL : Si l'utilisateur veut envoyer un email. Tu dois extraire "to", "subject", et GÉNÉRER le "body". Le "body" DOIT être le message final rédigé et adressé au destinataire (par exemple "Bonjour, ..."). Ne te contente pas de copier la phrase de l'utilisateur, interprète son intention pour écrire le vrai contenu de l'email.
+    - EMAIL : Si l'utilisateur veut envoyer un email. Tu dois extraire "to", "subject", et GÉNÉRER le "body". Le "body" DOIT être le message final rédigé et adressé au destinataire (par exemple "Bonjour, ..."). Ne te contente pas de copier la phrase de l'utilisateur, interprète son intention pour écrire le vrai contenu de l'email. IMPORTANT: Si on n'a pas d'adresse email, retourne ORCHESTRATOR d'abord pour demander les infos.
     - RAG : Si l'utilisateur pose une question sur un document. Extraire "question".
-    - CHAT : Pour tout le reste. Extraire "intent".
+    - ORCHESTRATOR : Pour tout le reste, l'orchestrateur gère directement.
+    
+    Retourne toujours ORCHESTRATOR si tu n'as pas assez d'informations pour compléter la tâche.
     """
     
     messages = [SystemMessage(content=sys_prompt)]
@@ -107,15 +108,19 @@ def rag_node(state: AgentState):
     }
 
 def chat_node(state: AgentState):
-    agent = agent_registry.get("CHAT")
-    if agent:
-        res = agent.run(
-            {"prompt": state["current_prompt"]},
-            llm=llm,
-            history=state.get("history", []),
-        )
-    else:
-        res = "Agent CHAT indisponible."
+    """L'orchestrateur répond directement sans agent chat séparé"""
+    sys_prompt = "Tu es l'orchestrateur IA AISenghor. Réponds de façon claire et utile."
+    messages = [SystemMessage(content=sys_prompt)]
+    
+    for msg in state.get("history", []):
+        if msg["role"] == "user":
+            messages.append(HumanMessage(content=msg["content"]))
+        else:
+            messages.append(AIMessage(content=msg["content"]))
+    
+    messages.append(HumanMessage(content=state["current_prompt"]))
+    res = llm.invoke(messages).content
+    
     return {"final_response": res, "explanation": ""}
 
 # --- Routage Conditionnel (Edges) ---
@@ -183,7 +188,10 @@ def continue_pending_email(user_text: str, pending_context: dict) -> dict:
             "response": "Agent EMAIL indisponible.",
             "pending_action": None,
         }
+    
+    # Laisser l'agent EMAIL gérer la demande des champs et la rédaction
     raw = agent.run({}, user_text=user_text, pending_context=pending_context or {})
+    
     pending_action = None
     if raw.get("status") == "needs_input":
         pending_action = {
@@ -191,6 +199,7 @@ def continue_pending_email(user_text: str, pending_context: dict) -> dict:
             "context": raw.get("context", {}),
             "missing_fields": raw.get("missing_fields", []),
         }
+    
     return {
         "agent": "EMAIL",
         "response": raw.get("response", "Erreur agent EMAIL."),

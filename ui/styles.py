@@ -24,7 +24,7 @@ def inject_styles():
       }
 
       /* Big Header */
-      .aiverse-header {
+      .aisenghor-header {
         text-align: center;
         font-size: 3rem;
         font-weight: 700;
@@ -34,7 +34,7 @@ def inject_styles():
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
       }
-      .aiverse-subheader {
+      .aisenghor-subheader {
         text-align: center;
         font-size: 1.1rem;
         color: #8da4ac;
@@ -190,11 +190,11 @@ def inject_styles():
       /* --- Responsive Mobile Design --- */
       @media (max-width: 768px) {
         /* Reduce header size */
-        .aiverse-header {
+        .aisenghor-header {
           font-size: 2.2rem !important;
           margin-top: 5vh !important;
         }
-        .aiverse-subheader {
+        .aisenghor-subheader {
           font-size: 0.95rem !important;
           margin-bottom: 2rem !important;
         }

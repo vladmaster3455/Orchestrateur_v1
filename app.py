@@ -2,14 +2,15 @@ import streamlit as st
 import re
 import streamlit.components.v1 as components
 from pathlib import Path
+
 from config import config
 from ui.styles import inject_styles
 from ui.sidebar import render_sidebar
-from orchestrator import route, continue_pending_email, continue_pending_rag  # Import moved to top to prevent cold start latency
+from orchestrator import route, continue_pending_email, continue_pending_rag
 
 # --- Page config -------------------------------------------------------------
 st.set_page_config(
-    page_title="AIVerse Orchestrator",
+    page_title="AISenghor Orchestrator",
     layout="centered",
     initial_sidebar_state="expanded",
 )
@@ -32,12 +33,14 @@ if "suggestion_prompt" not in st.session_state:
     st.session_state.suggestion_prompt = None
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
+if "scroll_to_bottom_next" not in st.session_state:
+    st.session_state.scroll_to_bottom_next = False
 if "next_history_id" not in st.session_state:
     st.session_state.next_history_id = 1
 if "pending_action" not in st.session_state:
     st.session_state.pending_action = None
 if "active_agent" not in st.session_state:
-    st.session_state.active_agent = "CHAT"
+    st.session_state.active_agent = None  # L'orchestrateur décide automatiquement
 
 
 SYMBOL_FILTER_PATTERN = re.compile(
@@ -64,24 +67,28 @@ def detect_agent_switch(text: str) -> str | None:
         return "RAG"
     if re.search(r"\b(a?g?e?n?t|agant)\b.*\b(email|mail)\b", lowered):
         return "EMAIL"
-    if re.search(r"\b(a?g?e?n?t|agant)\b.*\b(chat)\b", lowered):
-        return "CHAT"
-    return None
+    return None  # L'orchestrateur gère le routing
 
 
 def scroll_to_bottom():
+    # Use Streamlit's internal scroll mechanism
+    st.write("")  # Add empty element to scroll to
+    
     components.html(
         """
         <script>
-        const scrollNow = () => {
-            const main = window.parent.document.querySelector('section.main');
-            if (main) {
-                main.scrollTo({ top: main.scrollHeight, behavior: 'smooth' });
-            }
-            window.parent.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
-        };
-        setTimeout(scrollNow, 50);
-        setTimeout(scrollNow, 250);
+        window.scrollTo(0, document.body.scrollHeight);
+        document.documentElement.scrollTop = document.documentElement.scrollHeight;
+        document.body.scrollTop = document.body.scrollHeight;
+        
+        // Multiple attempts
+        for (let i = 1; i <= 10; i++) {
+            setTimeout(() => {
+                window.scrollTo(0, document.body.scrollHeight);
+                document.documentElement.scrollTop = document.documentElement.scrollHeight;
+                document.body.scrollTop = document.body.scrollHeight;
+            }, i * 100);
+        }
         </script>
         """,
         height=0,
@@ -141,8 +148,7 @@ with col1:
             "content": "**Agent Email**\nJe suis specialise dans la redaction et l'envoi de courriers electroniques. Donnez-moi l'adresse du destinataire et le contexte de votre message, et je me chargerai de rediger un email professionnel et de l'envoyer pour vous.\n\n*Essayez : \"Envoie un email a direction@entreprise.com pour demander une reunion demain.\"*",
             "agent": "EMAIL"
         })
-        scroll_to_bottom()
-        st.rerun()
+        st.session_state.scroll_to_bottom_next = True
 with col2:
     if st.button("Agent RAG", use_container_width=True, type="secondary", key="agent_rag_shortcut"):
         st.session_state.active_agent = "RAG"
@@ -152,24 +158,13 @@ with col2:
             "content": "**Agent RAG (Analyse Documentaire)**\nJe peux lire, comprendre et analyser vos documents (PDF, images, textes). Telechargez un fichier via le trombone dans la barre de saisie, puis posez-moi n'importe quelle question sur son contenu. Je chercherai intelligemment la reponse dans vos donnees.\n\n*Essayez d'uploader un PDF puis demandez : \"Fais-moi un resume des 3 points cles de ce document.\"*",
             "agent": "RAG"
         })
-        scroll_to_bottom()
-        st.rerun()
-with col3:
-    if st.button("Agent Chat", use_container_width=True, type="secondary", key="agent_chat_shortcut"):
-        st.session_state.active_agent = "CHAT"
-        st.session_state.pending_action = None
-        st.session_state.messages.append({
-            "role": "assistant",
-            "content": "**Agent Chat**\nJe suis le cerveau principal de l'Orchestrateur. Je suis la pour discuter, repondre a vos questions generales, faire de la traduction ou de la redaction, et surtout, comprendre vos intentions pour passer le relais aux autres agents si necessaire.\n\n*Essayez : \"Explique-moi comment fonctionne l'architecture LangGraph.\"*",
-            "agent": "CHAT"
-        })
-        scroll_to_bottom()
-        st.rerun()
+        st.session_state.scroll_to_bottom_next = True
 
-# --- Main Empty State (AIVerse Style) ----------------------------------------
+
+# --- Main Empty State (AISenghor Style) ----------------------------------------
 if len(st.session_state.messages) == 0:
-    st.markdown('<div class="aiverse-header">Tous vos outils favoris au même endroit</div>', unsafe_allow_html=True)
-    st.markdown('<div class="aiverse-subheader">Si aucune option n\'est sélectionnée, l\'orchestrateur LangGraph choisira automatiquement le meilleur agent en fonction de votre requête.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="aisenghor-header">Tous vos outils favoris au même endroit</div>', unsafe_allow_html=True)
+    st.markdown('<div class="aisenghor-subheader">Si aucune option n\'est sélectionnée, l\'orchestrateur LangGraph choisira automatiquement le meilleur agent en fonction de votre requête.</div>', unsafe_allow_html=True)
 
     st.markdown("<br><br>", unsafe_allow_html=True)
 
@@ -185,6 +180,11 @@ for msg in st.session_state.messages:
             if "agent" in msg and msg["agent"] != "CHAT":
                 agent_badge = f'<span class="agent-badge">Agent {msg["agent"]}</span><br><br>'
             st.markdown(f'<span class="assistant-msg-marker"></span>\n\n{agent_badge}{msg_content}', unsafe_allow_html=True)
+
+# Scroll to bottom after all messages are displayed
+if len(st.session_state.messages) > 0 or st.session_state.scroll_to_bottom_next:
+    scroll_to_bottom()
+    st.session_state.scroll_to_bottom_next = False
 
 # --- Input utilisateur -------------------------------------------------------
 prompt = st.chat_input("Message Ai Chat...", accept_file=True, file_type=["pdf", "txt", "png", "jpg", "jpeg"])
@@ -215,9 +215,6 @@ if user_text or uploaded_files:
     elif switch_target == "EMAIL":
         st.session_state.active_agent = "EMAIL"
         st.session_state.pending_action = {"agent": "EMAIL", "context": {}}
-    elif switch_target == "CHAT":
-        st.session_state.active_agent = "CHAT"
-        st.session_state.pending_action = None
 
     if uploaded_files:
         uploaded = uploaded_files[0]
@@ -264,15 +261,13 @@ if user_text or uploaded_files:
         else:
             with st.spinner("Traitement via LangGraph..."):
                 pending = st.session_state.pending_action
+                # Si on est en mode EMAIL ou RAG avec un pending, gérer directement SANS passer par le router
                 if pending and pending.get("agent") == "EMAIL":
                     result = continue_pending_email(user_text, pending.get("context", {}))
                 elif pending and pending.get("agent") == "RAG":
                     result = continue_pending_rag(user_text, pending.get("context", {}))
-                elif st.session_state.active_agent == "EMAIL":
-                    result = continue_pending_email(user_text, {})
-                elif st.session_state.active_agent == "RAG":
-                    result = continue_pending_rag(user_text, {})
                 else:
+                    # Sinon passer par le router LLM pour une classification intelligente
                     history = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages[:-1]]
                     result = route(user_text, history)
             
@@ -280,11 +275,11 @@ if user_text or uploaded_files:
             response_text = sanitize_text(result["response"])
             explanation   = result.get("explanation", "")
             st.session_state.pending_action = result.get("pending_action")
-            if agent in ["EMAIL", "RAG", "CHAT"]:
+            if agent in ["EMAIL", "RAG"]:
                 st.session_state.active_agent = agent
 
             agent_badge = ""
-            if agent != "CHAT":
+            if agent in ["EMAIL", "RAG"]:
                 agent_badge = f'<span class="agent-badge">Agent {agent}</span><br><br>'
 
             st.markdown(f'<span class="assistant-msg-marker"></span>\n\n{agent_badge}{response_text}', unsafe_allow_html=True)
@@ -293,5 +288,8 @@ if user_text or uploaded_files:
     st.session_state.messages.append({
         "role":    "assistant",
         "content": response_text,
-        "agent":   agent if "agent" in dir() else "CHAT"
+        "agent":   agent if "agent" in dir() else None
     })
+
+# Anchor point for scrolling
+st.markdown('<div id="scroll-anchor"></div>', unsafe_allow_html=True)

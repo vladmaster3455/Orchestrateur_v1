@@ -1,0 +1,3 @@
+{"timestamp": "2026-05-04T00:18:03.066720", "level": "ERROR", "logger": "agent_RAG", "message": "Error: Failed to initialize LLM: No module named 'langchain_anthropic'", "agent_id": "RAG", "action": null, "metadata": {}}
+{"timestamp": "2026-05-04T00:22:56.043213", "level": "ERROR", "logger": "agent_RAG", "message": "Error: Failed to initialize LLM: No module named 'langchain_anthropic'", "agent_id": "RAG", "action": null, "metadata": {}}
+{"timestamp": "2026-05-04T00:26:44.635281", "level": "ERROR", "logger": "agent_RAG", "message": "Error: Failed to initialize LLM: No module named 'langchain_anthropic'", "agent_id": "RAG", "action": null, "metadata": {}}

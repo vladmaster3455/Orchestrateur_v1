@@ -7,6 +7,9 @@ Projet d'orchestrateur multi-agents en Python pour mon Master. C'est fait pour t
 En gros, c'est un "cerveau" central  qui reçoit ton message et décide quel agent doit bosser. 
 Il y a 4 agents : WhatsApp, Email, RAG (pour tes docs) et un Chat normal et dautre en cours .
 
+
+La finalité estd efaire un systeme multi agent intelligent en cours 
+
 ## Structure du projet
 
 Dossier principal : orchestrator/

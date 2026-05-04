@@ -1,5 +1,9 @@
 .env
 .streamlit/secrets.toml
+ADVANCED_SYSTEM_README.md
+.ADVANCED_SYSTEM_README.md
+SYSTEM_SUMMARY.md
+MIGRATION_GUIDE.md
 chroma_db/
 documents/
 __pycache__/

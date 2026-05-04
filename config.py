@@ -1,15 +1,16 @@
 import os
 from dotenv import load_dotenv
-import streamlit as st
 
 load_dotenv(override=True)
 
 def get_secret(key: str, default: str = "") -> str:
     """
-    1. On essaie de prendre la clé dans st.secrets (Streamlit Cloud)
-    2. Si ça n'existe pas, on cherche dans os.environ (Local .env)
+    Get secret from environment or Streamlit secrets.
+    1. Try Streamlit secrets (if available)
+    2. Fall back to environment variables
     """
     try:
+        import streamlit as st
         return st.secrets.get(key) or os.getenv(key, default)
     except Exception:
         return os.getenv(key, default)

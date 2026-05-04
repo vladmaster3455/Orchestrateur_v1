@@ -3,7 +3,7 @@ from config import config
 
 def render_sidebar():
     with st.sidebar:
-        st.markdown("<h2 style='color: white; font-weight: 700;'>AIVerse</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 style='color: white; font-weight: 700;'>AISenghor</h2>", unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
 
         new_chat_clicked = st.button("Nouvelle Discussion", use_container_width=True, type="primary")

@@ -14,11 +14,74 @@ class EmailAgent(BaseAgent):
         return match.group(0) if match else ""
 
     def _build_missing_prompt(self, missing_fields: list[str]) -> str:
-        if missing_fields == ["to"]:
-            return "Il me manque l'adresse email du destinataire. Peux-tu me la donner ?"
         if missing_fields == ["body"]:
-            return "Il me manque le contenu du message. Peux-tu me donner le texte a envoyer ?"
-        return "Il me manque des informations pour envoyer l'email (destinataire et/ou message). Peux-tu completer ?"
+            return "Quel est le contexte ou le contenu du message que tu veux envoyer ? Donne-moi au moins quelques phrases pour que je puisse rédiger un email professionnel (minimum 20 caractères)."
+        if missing_fields == ["to"]:
+            return "À quelle adresse email dois-je envoyer ce message ?"
+        if "body" in missing_fields:
+            return "D'abord, quel est le contexte/contenu du message ? Raconte-moi ce que tu veux communiquer (minimum 20 caractères)."
+        return "Il me manque des informations pour envoyer l'email (contexte et destinataire). Peux-tu completer ?"
+    
+    def _is_valid_body(self, body: str) -> tuple[bool, str]:
+        """Vérifie que le body a assez de contenu."""
+        if not body:
+            return False, "Le message est vide."
+        
+        body_clean = body.strip()
+        if len(body_clean) < 10:
+            return False, f"Le message est trop court ({len(body_clean)} caractères). Donne-moi au moins 10 caractères de contenu valide."
+        
+        # Reject single words or very basic greetings
+        if body_clean.lower() in ["salut", "bonjour", "hello", "hi", "allo", "coucou", "ok", "non", "oui"]:
+            return False, f"'{body_clean}' n'est pas assez détaillé pour un email. Explique ce que tu veux communiquer."
+        
+        return True, ""
+
+    def _refine_body_professionally(self, body: str, to_email: str) -> tuple[str, str]:
+        """Rédige un email professionnel via Claude et génère un sujet.
+        Retourne: (body, subject)
+        """
+        try:
+            from langchain_anthropic import ChatAnthropic
+            from langchain_core.messages import SystemMessage, HumanMessage
+            
+            if not config.ANTHROPIC_API_KEY:
+                return body, "Sans objet"
+            
+            llm = ChatAnthropic(model="claude-haiku-4-5", api_key=config.ANTHROPIC_API_KEY)
+            
+            # Générer le sujet et le corps
+            sys_prompt = f"""Tu es un expert en rédaction d'emails professionnels.
+Basé sur cette demande: '{body}'
+
+Génère DEUX choses (séparées par |SEP|):
+1. Un SUJET court et clair pour l'email (max 10 mots)
+2. Le CORPS de l'email professionnel (avec salutation Bonjour/Madame/Monsieur et signature)
+
+Format strict: SUJET|SEP|CORPS
+
+Ne mets RIEN d'autre, pas d'explications."""
+            
+            messages = [
+                SystemMessage(content=sys_prompt),
+                HumanMessage(content="Génère l'email professionnel.")
+            ]
+            
+            response = llm.invoke(messages).content.strip()
+            
+            # Parser la réponse
+            if "|SEP|" in response:
+                parts = response.split("|SEP|")
+                subject = parts[0].strip() if parts[0] else "Sans objet"
+                improved_body = parts[1].strip() if len(parts) > 1 else body
+            else:
+                # Fallback si format incorrect
+                subject = "Sans objet"
+                improved_body = response
+            
+            return improved_body, subject
+        except:
+            return body, "Sans objet"  # En cas d'erreur
 
     def send_email(self, to_email: str, subject: str, body: str) -> dict:
         """Envoie un email via l'API REST de Brevo (Sendinblue)."""
@@ -27,6 +90,14 @@ class EmailAgent(BaseAgent):
                 "success": False,
                 "error": "Cle API Brevo manquante. Verifiez BREVO_API_KEY."
             }
+        
+        # Réécrire le body de manière professionnelle et générer un sujet intelligent
+        if len(body.strip()) > 5 and not body.startswith("Sans objet"):
+            refined_body, intelligent_subject = self._refine_body_professionally(body, to_email)
+            body = refined_body
+            # Utiliser le sujet généré si on n'avait que "Sans objet"
+            if subject == "Sans objet":
+                subject = intelligent_subject
 
         try:
             import sib_api_v3_sdk
@@ -92,22 +163,43 @@ class EmailAgent(BaseAgent):
 
         # If user is answering a follow-up, try to fill missing fields.
         if user_text:
-            if not to_email:
-                to_email = self._extract_email(user_text)
-            if not body:
-                if user_text != to_email:
-                    body = user_text
+            # Check if it looks like an email first
+            extracted_email = self._extract_email(user_text)
+            if extracted_email and not to_email:
+                to_email = extracted_email
+            # Otherwise, treat it as body content if we don't have a body yet
+            elif not body and not extracted_email:
+                body = user_text
+            elif not body and extracted_email:
+                # User gave us an email but we need body - keep looking for body
+                if len(user_text.replace(extracted_email, "").strip()) > 0:
+                    body = user_text.replace(extracted_email, "").strip()
+
+        # Valider le body s'il a été défini
+        body_valid = True
+        body_error = ""
+        if body:
+            body_valid, body_error = self._is_valid_body(body)
+            if not body_valid:
+                # Rejeter le body invalide
+                body = ""
 
         missing_fields = []
-        if not to_email:
-            missing_fields.append("to")
         if not body:
             missing_fields.append("body")
+        if not to_email:
+            missing_fields.append("to")
 
         if missing_fields:
+            # Si le body n'était pas valide, ajouter le message d'erreur
+            if body_error:
+                error_response = self._build_missing_prompt(missing_fields) + f"\n\n❌ {body_error}"
+            else:
+                error_response = self._build_missing_prompt(missing_fields)
+            
             return {
                 "status": "needs_input",
-                "response": self._build_missing_prompt(missing_fields),
+                "response": error_response,
                 "missing_fields": missing_fields,
                 "context": {"to": to_email, "subject": subject, "body": body},
             }
