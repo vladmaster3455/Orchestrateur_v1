@@ -3,11 +3,11 @@ Système de mémoire avancé pour agents autonomes.
 Supporte la mémorisation contextuelle, apprentissage et persistance.
 """
 
-from typing import Any, Dict, List, Optional
+import json
 from datetime import datetime
 from enum import Enum
-import json
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 
 class MemoryType(Enum):
@@ -22,9 +22,9 @@ class MemoryEntry:
         self,
         content: str,
         memory_type: MemoryType,
-        tags: List[str] = None,
+        tags: Optional[List[str]] = None,
         importance: float = 0.5,
-        metadata: Dict[str, Any] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ):
         self.content = content
         self.memory_type = memory_type
@@ -48,7 +48,9 @@ class MemoryEntry:
             "metadata": self.metadata,
             "created_at": self.created_at.isoformat(),
             "access_count": self.access_count,
-            "last_accessed": self.last_accessed.isoformat() if self.last_accessed else None,
+            "last_accessed": self.last_accessed.isoformat()
+            if self.last_accessed
+            else None,
         }
 
 
@@ -67,9 +69,9 @@ class AgentMemory:
         self,
         content: str,
         memory_type: MemoryType = MemoryType.SHORT_TERM,
-        tags: List[str] = None,
+        tags: Optional[List[str]] = None,
         importance: float = 0.5,
-        metadata: Dict[str, Any] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Store a memory entry."""
         entry = MemoryEntry(content, memory_type, tags, importance, metadata)
@@ -81,7 +83,7 @@ class AgentMemory:
 
     def retrieve(
         self,
-        tags: List[str] = None,
+        tags: Optional[List[str]] = None,
         memory_type: Optional[MemoryType] = None,
         limit: int = 10,
     ) -> List[MemoryEntry]:
@@ -94,10 +96,7 @@ class AgentMemory:
                 candidates.extend(mem_list)
 
         if tags:
-            candidates = [
-                m for m in candidates
-                if any(tag in m.tags for tag in tags)
-            ]
+            candidates = [m for m in candidates if any(tag in m.tags for tag in tags)]
 
         candidates.sort(key=lambda m: (m.importance, m.access_count), reverse=True)
         result = candidates[:limit]
@@ -111,8 +110,7 @@ class AgentMemory:
         """Consolidate short-term memories to long-term."""
         short_term = self.memories[MemoryType.SHORT_TERM.value]
         to_consolidate = [
-            m for m in short_term
-            if m.importance >= 0.7 or m.access_count >= 3
+            m for m in short_term if m.importance >= 0.7 or m.access_count >= 3
         ]
 
         for memory in to_consolidate:
@@ -126,10 +124,7 @@ class AgentMemory:
         for mem_list in self.memories.values():
             all_memories.extend(mem_list)
 
-        all_memories.sort(
-            key=lambda m: (m.importance, m.access_count),
-            reverse=True
-        )
+        all_memories.sort(key=lambda m: (m.importance, m.access_count), reverse=True)
 
         summary = "\n".join([m.content for m in all_memories[:limit]])
         return summary
@@ -153,3 +148,73 @@ class AgentMemory:
         else:
             for key in self.memories:
                 self.memories[key] = []
+
+
+class Blackboard:
+    """
+    memoire partagee entre tous les agents (pattern blackboard).
+    permet aux agents de communiquer de facon asynchrone sans se connaitre directement.
+
+    le blackboard est organise en namespaces pour eviter les collisions.
+    par exemple l'agent PLANNER ecrit dans 'plan' et l'agent CRITIC lit dans 'plan'.
+    """
+
+    def __init__(self) -> None:
+        # structure : { namespace : { key : value } }
+        self._data: Dict[str, Dict[str, Any]] = {}
+        self._history: List[Dict[str, Any]] = []  # journal de toutes les ecritures
+
+    def write(
+        self, namespace: str, key: str, value: Any, author: str = "unknown"
+    ) -> None:
+        """ecrit une valeur dans un namespace donne, trace l'auteur et le timestamp"""
+        if namespace not in self._data:
+            self._data[namespace] = {}
+        self._data[namespace][key] = value
+        self._history.append(
+            {
+                "timestamp": datetime.now().isoformat(),
+                "author": author,
+                "namespace": namespace,
+                "key": key,
+                "value_type": type(value).__name__,
+            }
+        )
+
+    def read(self, namespace: str, key: str, default: Any = None) -> Any:
+        """lit une valeur depuis un namespace, retourne default si absent"""
+        return self._data.get(namespace, {}).get(key, default)
+
+    def read_namespace(self, namespace: str) -> Dict[str, Any]:
+        """retourne tout le contenu d'un namespace"""
+        return dict(self._data.get(namespace, {}))
+
+    def has(self, namespace: str, key: str) -> bool:
+        """verifie si une cle existe dans un namespace"""
+        return key in self._data.get(namespace, {})
+
+    def list_namespaces(self) -> List[str]:
+        """liste tous les namespaces actifs"""
+        return list(self._data.keys())
+
+    def get_recent_writes(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """retourne les dernieres ecritures, utile pour le debug et le logging"""
+        return self._history[-limit:]
+
+    def clear_namespace(self, namespace: str) -> None:
+        """vide un namespace specifique"""
+        if namespace in self._data:
+            del self._data[namespace]
+
+    def clear_all(self) -> None:
+        """remet le blackboard a zero, utilise entre deux sessions"""
+        self._data = {}
+        self._history = []
+
+    def summary(self) -> Dict[str, Any]:
+        """resume de l'etat du blackboard, pratique pour le logging"""
+        return {
+            "namespaces": self.list_namespaces(),
+            "total_keys": sum(len(v) for v in self._data.values()),
+            "total_writes": len(self._history),
+        }

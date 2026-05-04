@@ -3,11 +3,11 @@
 Gère le contexte global, l'historique et la communication entre agents.
 """
 
-from typing import Any, Dict, List, Optional
+import json
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from dataclasses import dataclass, field
-import json
+from typing import Any, Dict, List, Optional
 
 
 class TaskStatus(Enum):
@@ -29,6 +29,7 @@ class ActionType(Enum):
 @dataclass
 class Action:
     """Représente une action exécutée par un agent."""
+
     action_type: ActionType
     agent_id: str
     content: str
@@ -54,6 +55,7 @@ class Action:
 @dataclass
 class Task:
     """Une tâche à accomplir."""
+
     task_id: str
     description: str
     priority: int = 0
@@ -79,7 +81,9 @@ class Task:
             "assigned_agent": self.assigned_agent,
             "created_at": self.created_at.isoformat(),
             "started_at": self.started_at.isoformat() if self.started_at else None,
-            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "completed_at": self.completed_at.isoformat()
+            if self.completed_at
+            else None,
             "subtasks": self.subtasks,
             "dependencies": self.dependencies,
             "context": self.context,
@@ -106,8 +110,8 @@ class CentralState:
         task_id: str,
         description: str,
         priority: int = 0,
-        context: Dict[str, Any] = None,
-        dependencies: List[str] = None,
+        context: Optional[Dict[str, Any]] = None,
+        dependencies: Optional[List[str]] = None,
     ) -> Task:
         """Create a new task."""
         task = Task(
@@ -173,27 +177,23 @@ class CentralState:
         message_type: str = "info",
     ) -> None:
         """Log inter-agent communication."""
-        self.communication_log.append({
-            "timestamp": datetime.now().isoformat(),
-            "sender": sender_id,
-            "recipient": recipient_id,
-            "message": message,
-            "type": message_type,
-        })
+        self.communication_log.append(
+            {
+                "timestamp": datetime.now().isoformat(),
+                "sender": sender_id,
+                "recipient": recipient_id,
+                "message": message,
+                "type": message_type,
+            }
+        )
 
     def get_pending_tasks(self) -> List[Task]:
         """Get all pending tasks."""
-        return [
-            t for t in self.tasks.values()
-            if t.status == TaskStatus.PENDING
-        ]
+        return [t for t in self.tasks.values() if t.status == TaskStatus.PENDING]
 
     def get_running_tasks(self) -> List[Task]:
         """Get all running tasks."""
-        return [
-            t for t in self.tasks.values()
-            if t.status == TaskStatus.RUNNING
-        ]
+        return [t for t in self.tasks.values() if t.status == TaskStatus.RUNNING]
 
     def get_action_history(self, agent_id: Optional[str] = None) -> List[Action]:
         """Get action history, optionally filtered by agent."""
@@ -208,14 +208,12 @@ class CentralState:
             "total_tasks": len(self.tasks),
             "pending_tasks": len(self.get_pending_tasks()),
             "running_tasks": len(self.get_running_tasks()),
-            "completed_tasks": len([
-                t for t in self.tasks.values()
-                if t.status == TaskStatus.COMPLETED
-            ]),
-            "failed_tasks": len([
-                t for t in self.tasks.values()
-                if t.status == TaskStatus.FAILED
-            ]),
+            "completed_tasks": len(
+                [t for t in self.tasks.values() if t.status == TaskStatus.COMPLETED]
+            ),
+            "failed_tasks": len(
+                [t for t in self.tasks.values() if t.status == TaskStatus.FAILED]
+            ),
             "total_actions": len(self.actions),
             "agents_active": list(self.agent_states.keys()),
             "communication_count": len(self.communication_log),
@@ -223,6 +221,8 @@ class CentralState:
 
     def export(self, filepath: str) -> None:
         """Export state to JSON file."""
+        from pathlib import Path
+
         data = {
             "created_at": self.created_at.isoformat(),
             "exported_at": datetime.now().isoformat(),
@@ -232,8 +232,6 @@ class CentralState:
             "agent_states": self.agent_states,
             "summary": self.get_state_summary(),
         }
-        import json
-        from pathlib import Path
         Path(filepath).write_text(json.dumps(data, indent=2))
 
     def clear(self) -> None:

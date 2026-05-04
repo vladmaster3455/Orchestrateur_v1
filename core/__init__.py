@@ -1,28 +1,28 @@
 """
-Core module: fondations du système multi-agents autonome avancé.
+core : fondations du systeme multi-agents autonome.
 """
 
-from core.memory import AgentMemory, MemoryEntry, MemoryType
-from core.state import CentralState, Task, TaskStatus, Action, ActionType
-from core.logging import StructuredLogger, AgentLogger, SystemLogger
-from core.quality import (
-    QualityEvaluator,
-    PriorityCalculator,
-    AggregateScorer,
-    QualityMetric,
-    PriorityLevel,
-)
-from core.autonomous_agent import AutonomousAgent, Plan, Observation
+from core.logging import AgentLogger, StructuredLogger, SystemLogger
+from core.memory import AgentMemory, Blackboard, MemoryEntry, MemoryType
 from core.orchestrator_advanced import (
     AdvancedOrchestrator,
-    WorkflowNode,
-    WorkflowStatus,
+    AgentScorer,
+    AutonomousLoopResult,
 )
+from core.quality import (
+    AggregateScorer,
+    PriorityCalculator,
+    PriorityLevel,
+    QualityEvaluator,
+    QualityMetric,
+)
+from core.state import Action, ActionType, CentralState, Task, TaskStatus
 
 __all__ = [
     "AgentMemory",
     "MemoryEntry",
     "MemoryType",
+    "Blackboard",
     "CentralState",
     "Task",
     "TaskStatus",
@@ -36,10 +36,7 @@ __all__ = [
     "AggregateScorer",
     "QualityMetric",
     "PriorityLevel",
-    "AutonomousAgent",
-    "Plan",
-    "Observation",
     "AdvancedOrchestrator",
-    "WorkflowNode",
-    "WorkflowStatus",
+    "AgentScorer",
+    "AutonomousLoopResult",
 ]

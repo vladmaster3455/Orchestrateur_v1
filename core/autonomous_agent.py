@@ -4,16 +4,14 @@ Supporte la planification, l'exécution multi-actions et l'apprentissage.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Tuple
-from enum import Enum
 from dataclasses import dataclass
 from datetime import datetime
-import json
+from enum import Enum
+from typing import Any, Dict, List, Optional
 
-from core.memory import AgentMemory, MemoryType
 from core.logging import AgentLogger
-from core.state import CentralState, Action, ActionType, TaskStatus, Task
-from core.quality import QualityEvaluator, AggregateScorer
+from core.memory import AgentMemory, MemoryType
+from core.state import Action, ActionType, CentralState, Task, TaskStatus
 
 
 class AgentState(Enum):
@@ -28,6 +26,7 @@ class AgentState(Enum):
 @dataclass
 class Plan:
     """Représente un plan avec plusieurs étapes."""
+
     plan_id: str
     description: str
     steps: List[Dict[str, Any]]
@@ -39,6 +38,7 @@ class Plan:
 @dataclass
 class Observation:
     """Résultat d'une observation."""
+
     timestamp: datetime
     success: bool
     data: Dict[str, Any]
@@ -214,7 +214,9 @@ class AutonomousAgent(ABC):
                 actions.append(action)
                 break
 
-        self.success_count += len([a for a in actions if a.status == TaskStatus.COMPLETED])
+        self.success_count += len(
+            [a for a in actions if a.status == TaskStatus.COMPLETED]
+        )
 
         return actions
 

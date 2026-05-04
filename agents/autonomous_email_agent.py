@@ -3,14 +3,14 @@ Agent Email autonome avec planification et exécution multi-étapes.
 Gère l'envoi d'emails via Brevo avec validation et réessais.
 """
 
-from typing import Dict, Any, Optional, List
-from datetime import datetime
 import re
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
-from core.autonomous_agent import AutonomousAgent, Plan, Observation, ActionType, Action
-from core.state import Task, TaskStatus, CentralState, ActionType
-from core.memory import MemoryType
 from config import config
+from core.autonomous_agent import Action, ActionType, AutonomousAgent, Observation, Plan
+from core.memory import MemoryType
+from core.state import ActionType, CentralState, Task, TaskStatus
 
 
 class AutonomousEmailAgent(AutonomousAgent):
@@ -187,26 +187,25 @@ class AutonomousEmailAgent(AutonomousAgent):
         subject: str,
         body: str,
     ) -> Dict[str, Any]:
-        """Envoyer l'email via l'API Brevo."""
-        if not config.BREVO_API_KEY:
+        """Envoie l'email via le service de messagerie configure."""
+        if not config.MAILER_API_KEY:
             return {
                 "success": False,
-                "error": "Brevo API key not configured",
+                "error": "Cle du service d'emails manquante. Verifiez votre .env.",
             }
 
         try:
             import sib_api_v3_sdk
-            from sib_api_v3_sdk.rest import ApiException
 
             configuration = sib_api_v3_sdk.Configuration()
-            configuration.api_key['api-key'] = config.BREVO_API_KEY
+            configuration.api_key["api-key"] = config.MAILER_API_KEY
 
             api_instance = sib_api_v3_sdk.TransactionalEmailsApi(
                 sib_api_v3_sdk.ApiClient(configuration)
             )
 
             send_smtp_email = sib_api_v3_sdk.SendSmtpEmail(
-                sender={"name": "Orchestrateur IA", "email": config.EMAIL_FROM},
+                sender={"name": "Orchestrateur IA", "email": config.SENDER_EMAIL},
                 to=[{"email": to_email}],
                 subject=subject,
                 html_content=f"<p>{body.replace(chr(10), '<br>')}</p>",

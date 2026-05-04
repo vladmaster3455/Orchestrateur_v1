@@ -21,10 +21,10 @@ class LogLevel(Enum):
 class StructuredLogger:
     """Logger structuré pour production."""
 
-    def __init__(self, name: str, log_dir: str = "logs"):
+    def __init__(self, name: str, log_dir: str = "data/logs"):
         self.name = name
         self.log_dir = Path(log_dir)
-        self.log_dir.mkdir(exist_ok=True)
+        self.log_dir.mkdir(exist_ok=True, parents=True)
 
         self.logger = logging.getLogger(name)
         self.logger.setLevel(logging.DEBUG)
@@ -119,7 +119,7 @@ class StructuredLogger:
 class AgentLogger:
     """Logger spécialisé pour un agent."""
 
-    def __init__(self, agent_id: str, log_dir: str = "logs"):
+    def __init__(self, agent_id: str, log_dir: str = "data/logs"):
         self.agent_id = agent_id
         self.structured_logger = StructuredLogger(f"agent_{agent_id}", log_dir)
 
@@ -169,7 +169,7 @@ class AgentLogger:
 class SystemLogger:
     """Global system logger."""
 
-    def __init__(self, log_dir: str = "logs"):
+    def __init__(self, log_dir: str = "data/logs"):
         self.structured_logger = StructuredLogger("system", log_dir)
 
     def log_workflow(

@@ -3,13 +3,13 @@ Agent RAG autonome avec planification et exécution multi-étapes.
 Gère la recherche documentaire et l'extraction d'informations.
 """
 
-from typing import Dict, Any, Optional, List
 from datetime import datetime
+from typing import Any, Dict, List, Optional
 
-from core.autonomous_agent import AutonomousAgent, Plan, Observation, ActionType
-from core.state import Task, TaskStatus, CentralState, Action, ActionType
-from core.memory import MemoryType
 from config import config
+from core.autonomous_agent import AutonomousAgent, Observation, Plan
+from core.memory import MemoryType
+from core.state import Action, ActionType, CentralState, Task, TaskStatus
 
 
 class AutonomousRAGAgent(AutonomousAgent):
@@ -23,12 +23,13 @@ class AutonomousRAGAgent(AutonomousAgent):
         self._init_llm()
 
     def _init_llm(self) -> None:
-        """Initialiser le LLM et le store vectoriel."""
+        """Initialise le LLM depuis la config, sans exposer le fournisseur."""
         try:
             from langchain_anthropic import ChatAnthropic
-            self.llm = ChatAnthropic(
-                model="claude-haiku-4-5",
-                api_key=config.ANTHROPIC_API_KEY,
+
+            self.llm = ChatAnthropic(  # type: ignore[call-arg]
+                model=config.LLM_MODEL,
+                api_key=config.LLM_API_KEY,
             )
         except Exception as e:
             self.logger.log_error(f"Failed to initialize LLM: {str(e)}")
@@ -197,7 +198,7 @@ class AutonomousRAGAgent(AutonomousAgent):
     def _generate_response(
         self,
         question: str,
-        passages: List[str] = None,
+        passages: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Générer une réponse basée sur les passages."""
         if not self.llm:
@@ -219,7 +220,7 @@ Context:
 Please provide a clear and accurate answer."""
 
             response = self.llm.invoke(prompt)
-            answer = response.content if hasattr(response, 'content') else str(response)
+            answer = response.content if hasattr(response, "content") else str(response)
 
             return {
                 "success": True,

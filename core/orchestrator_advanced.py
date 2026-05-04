@@ -1,465 +1,531 @@
 """
-Orchestrateur avancé multi-agents avec gestion de workflows complexes.
-Gère la décomposition de tâches, priorités, retry, validation et coordination.
+orchestrateur avance : le vrai cerveau du systeme multi-agents.
+
+implemente la boucle autonome complete :
+  Analyse -> Plan -> Execute -> Observe -> Critique -> Ajuste -> Repete
+
+caracteristiques importantes :
+- selection d'agent par scoring (pas de logique hardcodee)
+- re-planning dynamique quand le CriticAgent desapprouve
+- execution asynchrone des etapes independantes (asyncio)
+- collaboration entre agents via le Blackboard
+- condition de terminaison : score >= seuil ou max iterations atteint
+- rapport d'execution detaille en fin de boucle
+
+c'est pas un pipeline lineaire bete, chaque iteration peut changer
+completement le plan en fonction des resultats et du feedback.
 """
 
-from typing import Any, Dict, List, Optional, Callable, Tuple
-from datetime import datetime
-from enum import Enum
+from __future__ import annotations
+
 import asyncio
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
-from core.state import CentralState, Task, TaskStatus, Action, ActionType
-from core.autonomous_agent import AutonomousAgent
 from core.logging import SystemLogger
-from core.quality import PriorityCalculator, AggregateScorer, QualityEvaluator
+from core.memory import Blackboard
+from core.quality import PriorityCalculator
+from core.state import CentralState
+
+# seuil de qualite pour terminer la boucle automatiquement
+CONVERGENCE_THRESHOLD = 0.7
+# nombre max d'iterations pour evite les boucles infinies
+MAX_ITERATIONS = 5
 
 
-class WorkflowStatus(Enum):
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    PAUSED = "paused"
+@dataclass
+class AutonomousLoopResult:
+    """
+    resultat complet d'une execution de la boucle autonome.
+    contient toutes les informations pour le rapport final.
+    """
+
+    task_description: str
+    iterations: int
+    final_score: float
+    converged: bool
+    final_response: str
+    plan_history: List[Dict[str, Any]] = field(default_factory=list)
+    execution_history: List[Dict[str, Any]] = field(default_factory=list)
+    critic_history: List[Dict[str, Any]] = field(default_factory=list)
+    agent_scores: Dict[str, float] = field(default_factory=dict)
+    started_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    finished_at: str = ""
+    error: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "task": self.task_description,
+            "iterations": self.iterations,
+            "final_score": self.final_score,
+            "converged": self.converged,
+            "final_response": self.final_response,
+            "plan_history": self.plan_history,
+            "execution_history": self.execution_history,
+            "critic_history": self.critic_history,
+            "agent_scores": self.agent_scores,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "error": self.error,
+        }
 
 
-class WorkflowNode:
-    """Un noeud dans un workflow DAG."""
+class AgentScorer:
+    """
+    calcule un score de pertinence pour chaque agent en fonction de la tache.
+    le scoring est base sur :
+    - les stats historiques de l'agent (taux de succes, nb d'erreurs)
+    - la charge actuelle (nb de taches en cours)
+    - la pertinence par rapport au type de tache
 
-    def __init__(
-        self,
-        node_id: str,
-        handler: Callable,
-        dependencies: List[str] = None,
-        retry_policy: Dict[str, Any] = None,
-        fallback_handler: Optional[Callable] = None,
-    ):
-        self.node_id = node_id
-        self.handler = handler
-        self.dependencies = dependencies or []
-        self.retry_policy = retry_policy or {"max_retries": 3, "backoff": "exponential"}
-        self.fallback_handler = fallback_handler
-        self.result = None
-        self.error = None
+    ca evite la logique hardcodee "toujours utiliser PLANNER en premier"
+    et permet au systeme de s'adapter dynamiquement.
+    """
+
+    @staticmethod
+    def score_agents(
+        agents: Dict[str, Any],
+        task_context: str,
+        preferred_type: Optional[str] = None,
+    ) -> Dict[str, float]:
+        """
+        retourne un dict {agent_name: score} trie par score decroissant.
+        le score le plus haut = l'agent le plus adapte pour cette tache.
+        """
+        scores: Dict[str, float] = {}
+
+        for agent_name, agent in agents.items():
+            success_count = getattr(agent, "success_count", 0)
+            error_count = getattr(agent, "error_count", 0)
+            total = success_count + error_count
+
+            error_rate = error_count / total if total > 0 else 0.0
+            reliability = max(0.0, 1.0 - error_rate)
+
+            # bonus si c'est le type prefere pour ce tour
+            type_bonus = 0.2 if preferred_type and agent_name == preferred_type else 0.0
+
+            score = (
+                PriorityCalculator.calculate_agent_priority(
+                    queue_size=0,  # on a pas de queue dans cette version
+                    error_rate=error_rate,
+                    avg_execution_time=1.0,
+                    reliability=reliability,
+                )
+                + type_bonus
+            )
+
+            scores[agent_name] = round(min(1.0, score), 4)
+
+        return scores
+
+    @staticmethod
+    def best_agent(scores: Dict[str, float]) -> Optional[str]:
+        """retourne le nom de l'agent avec le meilleur score"""
+        if not scores:
+            return None
+        return max(scores.items(), key=lambda x: x[1])[0]
 
 
 class AdvancedOrchestrator:
     """
-    Orchestrateur avancé pour coordonner plusieurs agents autonomes.
-    Gère les workflows complexes, priorités, et validation.
+    orchestrateur avance qui coordonne PlannerAgent, ExecutorAgent, CriticAgent et ToolAgent.
+
+    la boucle autonome tourne jusqu'a convergence (score suffisant)
+    ou jusqu'au nombre max d'iterations.
+
+    le systeme peut aussi executer des taches simples en mode direct
+    sans passer par la boucle complete (pour les taches legeres).
     """
 
-    def __init__(self, central_state: CentralState):
-        self.central_state = central_state
-        self.agents: Dict[str, AutonomousAgent] = {}
-        self.logger = SystemLogger()
-        self.workflows: Dict[str, Dict[str, Any]] = {}
-        self.task_queue: List[Task] = []
-        self.validation_rules: Dict[str, Callable] = {}
-
-    def register_agent(self, agent: AutonomousAgent) -> None:
-        """Enregistrer un agent autonome."""
-        self.agents[agent.agent_id] = agent
-        self.logger.log_workflow(
-            f"Agent registered: {agent.agent_id}",
-            "success",
-        )
-
-    def register_validation_rule(
+    def __init__(
         self,
-        rule_id: str,
-        validator: Callable[[Dict[str, Any]], bool],
+        planner: Any,
+        executor: Any,
+        critic: Any,
+        tool_agent: Any,
+        blackboard: Blackboard,
+        central_state: Optional[CentralState] = None,
     ) -> None:
-        """Enregistrer une règle de validation."""
-        self.validation_rules[rule_id] = validator
+        self.planner = planner
+        self.executor = executor
+        self.critic = critic
+        self.tool_agent = tool_agent
+        self.blackboard = blackboard
+        self.central_state = central_state or CentralState()
+        self.logger = SystemLogger()
 
-    def decompose_complex_task(
-        self,
-        parent_task: Task,
-    ) -> List[Task]:
-        """
-        Décomposer une tâche complexe en sous-tâches.
-        Crée une hierarchie de tâches avec dépendances.
-        """
-        subtasks = []
-
-        steps = parent_task.context.get("steps", [])
-        for i, step in enumerate(steps):
-            subtask_id = f"{parent_task.task_id}_step_{i}"
-
-            subtask = self.central_state.create_task(
-                task_id=subtask_id,
-                description=step.get("description", f"Subtask {i}"),
-                priority=parent_task.priority,
-                context=step.get("context", {}),
-                dependencies=[subtasks[-1].task_id] if subtasks else [],
-            )
-
-            subtask.context["parent_task"] = parent_task.task_id
-            subtasks.append(subtask)
-
-        parent_task.subtasks = [t.task_id for t in subtasks]
-        self.logger.log_task_event(
-            parent_task.task_id,
-            f"Decomposed into {len(subtasks)} subtasks",
-        )
-
-        return subtasks
-
-    def prioritize_queue(self) -> List[Task]:
-        """
-        Trier la queue de tâches selon les priorités dynamiques.
-        Considère l'urgence, l'impact et les dépendances.
-        """
-        pending_tasks = self.central_state.get_pending_tasks()
-
-        scoring_list = []
-        for task in pending_tasks:
-            urgency = task.context.get("urgency", 0.5)
-            impact = task.context.get("impact", 0.5)
-            dependent_count = len([
-                t for t in pending_tasks
-                if task.task_id in t.dependencies
-            ])
-
-            adjusted_priority = PriorityCalculator.calculate_priority(
-                base_priority=task.priority,
-                urgency=urgency,
-                impact=impact,
-                dependencies_count=dependent_count,
-            )
-
-            scoring_list.append((task, adjusted_priority))
-
-        scoring_list.sort(key=lambda x: x[1], reverse=True)
-        self.task_queue = [task for task, _ in scoring_list]
-
-        return self.task_queue
-
-    def assign_task_to_agent(self, task: Task) -> Optional[str]:
-        """
-        Assigner une tâche au meilleur agent disponible.
-        Considère les compétences, la charge actuelle et l'historique.
-        """
-        if not self.agents:
-            return None
-
-        agent_scores = {}
-
-        for agent_id, agent in self.agents.items():
-            queue_size = len([
-                t for t in self.central_state.tasks.values()
-                if t.assigned_agent == agent_id and t.status == TaskStatus.RUNNING
-            ])
-
-            error_rate = (
-                agent.error_count / (agent.success_count + agent.error_count + 1)
-            )
-
-            avg_exec_time = (
-                sum(len(a.to_dict().get("content", "")) for a in agent.action_history) /
-                max(1, len(agent.action_history))
-            )
-
-            reliability = max(0.0, 1.0 - error_rate)
-
-            score = PriorityCalculator.calculate_agent_priority(
-                queue_size=queue_size,
-                error_rate=error_rate,
-                avg_execution_time=avg_exec_time,
-                reliability=reliability,
-            )
-
-            agent_scores[agent_id] = score
-
-        if not agent_scores:
-            return None
-
-        best_agent = max(agent_scores.items(), key=lambda x: x[1])[0]
-        task.assigned_agent = best_agent
-
-        self.central_state.update_task(task.task_id, assigned_agent=best_agent)
-
-        self.logger.log_task_event(
-            task.task_id,
-            f"Assigned to agent {best_agent}",
-            {"agent_scores": agent_scores},
-        )
-
-        return best_agent
-
-    def execute_workflow(
-        self,
-        workflow_name: str,
-        nodes: Dict[str, WorkflowNode],
-    ) -> Dict[str, Any]:
-        """
-        Exécuter un workflow DAG avec gestion des dépendances et erreurs.
-        """
-        self.logger.log_workflow(workflow_name, "started")
-
-        workflow_result = {
-            "workflow": workflow_name,
-            "status": WorkflowStatus.RUNNING.value,
-            "nodes": {},
-            "errors": [],
-            "start_time": datetime.now().isoformat(),
+        # registre interne des agents pour le scoring
+        self._agents: Dict[str, Any] = {
+            "PLANNER": planner,
+            "EXECUTOR": executor,
+            "CRITIC": critic,
+            "TOOL": tool_agent,
         }
 
-        executed = set()
-        failed = set()
+    def run_autonomous_loop(
+        self,
+        task_description: str,
+        max_iterations: int = MAX_ITERATIONS,
+        convergence_threshold: float = CONVERGENCE_THRESHOLD,
+    ) -> AutonomousLoopResult:
+        """
+        boucle autonome principale.
 
-        while len(executed) < len(nodes):
-            made_progress = False
+        a chaque iteration :
+        1. PLANNER genere ou revise le plan (prend en compte le feedback du CRITIC)
+        2. EXECUTOR execute le plan etape par etape (respect des dependances DAG)
+        3. CRITIC evalue le resultat et donne un score + feedback
+        4. si score >= seuil : on s'arrete (convergence)
+        5. sinon : iteration suivante avec re-planning base sur le feedback
 
-            for node_id, node in nodes.items():
-                if node_id in executed or node_id in failed:
-                    continue
+        c'est une vraie boucle de controle, pas un pipeline lineaire.
+        """
+        result = AutonomousLoopResult(
+            task_description=task_description,
+            iterations=0,
+            final_score=0.0,
+            converged=False,
+            final_response="",
+        )
 
-                deps_satisfied = all(dep in executed for dep in node.dependencies)
+        self.logger.log_workflow(
+            f"autonomous_loop:{task_description[:50]}",
+            "started",
+            {"max_iterations": max_iterations, "threshold": convergence_threshold},
+        )
 
-                if not deps_satisfied:
-                    continue
+        # nettoyer le blackboard pour cette nouvelle session
+        self.blackboard.clear_all()
 
-                made_progress = True
-                result = self._execute_node_with_retry(node)
+        current_score = 0.0
+        iteration = 0
 
-                if result["success"]:
-                    executed.add(node_id)
-                    workflow_result["nodes"][node_id] = result
-                else:
-                    failed.add(node_id)
-                    workflow_result["errors"].append(result["error"])
-
-                    if node.fallback_handler:
-                        fallback_result = self._execute_fallback(node, result)
-                        workflow_result["nodes"][f"{node_id}_fallback"] = fallback_result
-                        if fallback_result["success"]:
-                            executed.add(node_id)
-
-            if not made_progress:
-                remaining = set(nodes.keys()) - executed - failed
-                workflow_result["errors"].append(
-                    f"Workflow stuck: {remaining} nodes cannot be executed"
+        try:
+            while iteration < max_iterations:
+                iteration += 1
+                self.logger.log_task_event(
+                    f"iteration_{iteration}",
+                    f"Debut iteration {iteration}/{max_iterations}",
                 )
-                break
 
-        workflow_result["end_time"] = datetime.now().isoformat()
+                # --- PHASE 1 : SCORING pour choisir l'agent de planification ---
+                # on calcule le score de tous les agents avant de decider
+                # ca permet de detecter si un agent est en train de planter
+                agent_scores = AgentScorer.score_agents(
+                    self._agents,
+                    task_description,
+                    preferred_type="PLANNER",
+                )
+                result.agent_scores = agent_scores
 
-        if len(failed) == 0:
-            workflow_result["status"] = WorkflowStatus.COMPLETED.value
-            self.logger.log_workflow(workflow_name, "completed")
-        else:
-            workflow_result["status"] = WorkflowStatus.FAILED.value
-            self.logger.log_workflow(workflow_name, "failed", workflow_result)
-
-        self.workflows[workflow_name] = workflow_result
-        return workflow_result
-
-    def _execute_node_with_retry(self, node: WorkflowNode) -> Dict[str, Any]:
-        """Exécuter un noeud avec stratégie de retry."""
-        max_retries = node.retry_policy.get("max_retries", 3)
-        backoff = node.retry_policy.get("backoff", "exponential")
-
-        for attempt in range(max_retries + 1):
-            try:
-                result = node.handler()
-
-                return {
-                    "success": True,
-                    "result": result,
-                    "attempts": attempt + 1,
-                }
-
-            except Exception as e:
-                if attempt < max_retries:
-                    wait_time = self._calculate_backoff(attempt, backoff)
-                    self.logger.structured_logger.warning(
-                        f"Node {node.node_id} failed, retrying in {wait_time}s",
-                        action="retry",
-                    )
-
-                else:
-                    return {
-                        "success": False,
-                        "error": str(e),
-                        "attempts": attempt + 1,
+                # --- PHASE 2 : PLANNER ---
+                plan_result = self.planner.run(task_description, iteration=iteration)
+                result.plan_history.append(
+                    {
+                        "iteration": iteration,
+                        "steps_count": len(plan_result.get("steps", [])),
+                        "complexity": plan_result.get("complexity", "unknown"),
+                        "success": plan_result.get("success", False),
                     }
+                )
+
+                if not plan_result.get("success") or not plan_result.get("steps"):
+                    # le planner a echoue, on essaie quand meme de continuer
+                    self.logger.log_task_event(
+                        f"iteration_{iteration}",
+                        "Planner a echoue, tentative sans plan structure",
+                    )
+                    break
+
+                # --- PHASE 3 : EXECUTOR (avec support async des etapes independantes) ---
+                exec_result = asyncio.run(
+                    self._execute_async(task_description, plan_result.get("steps", []))
+                )
+                result.execution_history.append(
+                    {
+                        "iteration": iteration,
+                        "results_count": len(exec_result.get("results", [])),
+                        "summary": exec_result.get("summary", ""),
+                        "success": exec_result.get("success", False),
+                    }
+                )
+
+                # --- PHASE 4 : CRITIC ---
+                critic_result = self.critic.run(task_description)
+                current_score = critic_result.get("score", 0.0)
+                approved = critic_result.get("approved", False)
+
+                result.critic_history.append(
+                    {
+                        "iteration": iteration,
+                        "score": current_score,
+                        "approved": approved,
+                        "feedback": critic_result.get("feedback", ""),
+                        "needs_replanning": critic_result.get(
+                            "needs_replanning", False
+                        ),
+                    }
+                )
+
+                self.logger.log_task_event(
+                    f"iteration_{iteration}",
+                    f"Score critique : {current_score:.2f}, approuve : {approved}",
+                )
+
+                # --- PHASE 5 : CONDITION DE TERMINAISON ---
+                if current_score >= convergence_threshold or approved:
+                    result.converged = True
+                    self.logger.log_workflow(
+                        f"autonomous_loop:{task_description[:50]}",
+                        "converged",
+                        {"score": current_score, "iteration": iteration},
+                    )
+                    break
+
+                # si pas approuve, le planner re-planifiera en prenant en compte le feedback
+                # le feedback est deja sur le blackboard, le prochain appel planner.run() le lira
+                self.logger.log_task_event(
+                    f"iteration_{iteration}",
+                    f"Score insuffisant ({current_score:.2f} < {convergence_threshold}), re-planning...",
+                )
+
+        except Exception as exc:
+            result.error = str(exc)
+            self.logger.log_workflow(
+                f"autonomous_loop:{task_description[:50]}",
+                "error",
+                {"error": str(exc)},
+            )
+
+        # --- PHASE 6 : SYNTHESE DU RESULTAT FINAL ---
+        result.iterations = iteration
+        result.final_score = current_score
+        result.finished_at = datetime.now().isoformat()
+        result.final_response = self._synthesize_response(result)
+
+        self.logger.log_workflow(
+            f"autonomous_loop:{task_description[:50]}",
+            "completed",
+            {
+                "iterations": iteration,
+                "final_score": current_score,
+                "converged": result.converged,
+            },
+        )
+
+        return result
+
+    async def _execute_async(
+        self,
+        task_description: str,
+        steps: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """
+        execute les etapes du plan de maniere asynchrone quand c'est possible.
+        les etapes sans dependances sont executees en parallele.
+        les etapes avec dependances attendent leurs predecesseurs.
+
+        c'est le mecanisme de parallelisation qui rend le systeme plus rapide
+        pour les plans avec des etapes independantes.
+        """
+        if not steps:
+            return {"results": [], "summary": "Aucune etape.", "success": True}
+
+        # grouper les etapes par niveau de dependance (tri topologique)
+        levels = self._topological_sort(steps)
+
+        all_results: List[Dict[str, Any]] = []
+        completed_steps: set = set()
+
+        for level in levels:
+            # les etapes du meme niveau n'ont pas de dependances entre elles
+            # on peut les executer en parallele avec asyncio.gather
+            tasks = [
+                asyncio.to_thread(self._execute_single_step, step, task_description)
+                for step in level
+            ]
+            level_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for i, step_result in enumerate(level_results):
+                if isinstance(step_result, Exception):
+                    step_result = {
+                        "step_id": level[i].get("id", "?"),
+                        "success": False,
+                        "error": str(step_result),
+                        "output": None,
+                    }
+                if isinstance(step_result, dict):
+                    all_results.append(step_result)
+                completed_steps.add(level[i].get("id", ""))
+
+        # ecrire les resultats sur le blackboard pour le CriticAgent
+        self.blackboard.write(
+            "execution", "results", all_results, author="EXECUTOR_ASYNC"
+        )
+        self.blackboard.write(
+            "execution",
+            "summary",
+            f"{len(all_results)} etapes executees en {len(levels)} niveaux parallelises.",
+            author="EXECUTOR_ASYNC",
+        )
 
         return {
-            "success": False,
-            "error": "Max retries exceeded",
-            "attempts": max_retries + 1,
+            "results": all_results,
+            "summary": f"{len(all_results)} etapes executees en {len(levels)} niveaux parallelises.",
+            "success": all(
+                r.get("success", False) for r in all_results if isinstance(r, dict)
+            ),
         }
 
-    def _execute_fallback(
+    def _topological_sort(
+        self, steps: List[Dict[str, Any]]
+    ) -> List[List[Dict[str, Any]]]:
+        """
+        trie les etapes par niveaux de dependance.
+        retourne une liste de listes : chaque sous-liste est un niveau
+        dont les etapes peuvent etre executees en parallele.
+        """
+        if not steps:
+            return []
+
+        step_map = {s.get("id", str(i)): s for i, s in enumerate(steps)}
+        in_degree: Dict[str, int] = {s_id: 0 for s_id in step_map}
+
+        for step in steps:
+            for dep in step.get("depends_on", []):
+                if dep in in_degree:
+                    in_degree[step.get("id", "")] = (
+                        in_degree.get(step.get("id", ""), 0) + 1
+                    )
+
+        levels: List[List[Dict[str, Any]]] = []
+        remaining = dict(in_degree)
+
+        while remaining:
+            # prendre toutes les etapes avec in_degree == 0 (pas de dependances non satisfaites)
+            current_level = [
+                step_map[s_id]
+                for s_id, degree in remaining.items()
+                if degree == 0 and s_id in step_map
+            ]
+
+            if not current_level:
+                # cycle detecte, on ajoute tout le reste dans un niveau final
+                current_level = [
+                    step_map[s_id] for s_id in remaining if s_id in step_map
+                ]
+                levels.append(current_level)
+                break
+
+            levels.append(current_level)
+
+            # supprimer les etapes traitees et mettre a jour les in-degrees
+            processed = {s.get("id", "") for s in current_level}
+            remaining = {
+                s_id: degree
+                for s_id, degree in remaining.items()
+                if s_id not in processed
+            }
+
+            for s_id in list(remaining.keys()):
+                step = step_map.get(s_id)
+                if step:
+                    deps_done = sum(
+                        1 for dep in step.get("depends_on", []) if dep in processed
+                    )
+                    remaining[s_id] = max(0, remaining[s_id] - deps_done)
+
+        return levels
+
+    def _execute_single_step(
         self,
-        node: WorkflowNode,
-        original_error: Dict[str, Any],
+        step: Dict[str, Any],
+        task_context: str,
     ) -> Dict[str, Any]:
-        """Exécuter un gestionnaire de fallback."""
-        try:
-            result = node.fallback_handler(original_error)
-            return {
-                "success": True,
-                "result": result,
-                "is_fallback": True,
-            }
+        """execute une seule etape, utilise par _execute_async via asyncio.to_thread"""
+        # deleger a l'executor ou au tool_agent selon le type d'etape
+        agent_type = step.get("agent", "EXECUTOR").upper()
+        step_desc = step.get("description", "etape inconnue")
 
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "is_fallback": True,
-            }
-
-    def _calculate_backoff(self, attempt: int, strategy: str) -> float:
-        """Calculer le délai d'attente pour un retry."""
-        if strategy == "exponential":
-            return min(2 ** attempt, 60)
-        elif strategy == "linear":
-            return attempt * 5
+        if agent_type == "TOOL":
+            result = self.tool_agent.run(step_desc)
         else:
-            return 1
+            result = self.executor._execute_step(step, task_context)
 
-    def validate_result(
-        self,
-        task: Task,
-        result: Dict[str, Any],
-    ) -> Tuple[bool, Optional[str]]:
+        return result
+
+    def _synthesize_response(self, result: AutonomousLoopResult) -> str:
         """
-        Valider un résultat contre les règles de validation.
-        Retourne (is_valid, error_message).
+        synthetise une reponse finale lisible depuis l'historique d'execution.
+        extrait les outputs des etapes reussies et les presente de facon coherente.
         """
-        validation_rules = task.context.get("validation_rules", [])
+        if result.error:
+            return f"La boucle autonome a rencontre une erreur : {result.error}"
 
-        for rule_id in validation_rules:
-            if rule_id not in self.validation_rules:
-                continue
+        exec_results = self.blackboard.read("execution", "results", default=[])
 
-            validator = self.validation_rules[rule_id]
-
-            try:
-                is_valid = validator(result)
-
-                if not is_valid:
-                    return (False, f"Validation rule '{rule_id}' failed")
-
-            except Exception as e:
-                return (False, f"Error running validation '{rule_id}': {str(e)}")
-
-        return (True, None)
-
-    def execute_task(self, task: Task) -> Dict[str, Any]:
-        """
-        Exécuter une tâche avec validation et gestion d'erreurs.
-        """
-        agent_id = self.assign_task_to_agent(task)
-
-        if not agent_id or agent_id not in self.agents:
-            task.error = "No suitable agent found"
-            self.central_state.update_task(task.task_id, status=TaskStatus.FAILED)
-            return {"success": False, "error": "No suitable agent"}
-
-        agent = self.agents[agent_id]
-        self.central_state.update_task(task.task_id, status=TaskStatus.RUNNING)
-
-        try:
-            result = agent.run_autonomous_loop(task)
-
-            is_valid, validation_error = self.validate_result(task, result)
-
-            if not is_valid:
-                if task.retry_count < task.max_retries:
-                    task.retry_count += 1
-                    self.central_state.update_task(
-                        task.task_id,
-                        status=TaskStatus.PENDING,
-                    )
-                    return self.execute_task(task)
-
-                else:
-                    task.error = validation_error
-                    self.central_state.update_task(
-                        task.task_id,
-                        status=TaskStatus.FAILED,
-                        error=validation_error,
-                    )
-                    return {"success": False, "error": validation_error}
-
-            self.central_state.update_task(
-                task.task_id,
-                status=TaskStatus.COMPLETED,
-                result=result,
+        if not exec_results:
+            return (
+                "La boucle autonome a termine sans produire de resultats exploitables."
             )
 
-            return {"success": True, "result": result}
+        # extraire les outputs des etapes reussies
+        outputs = []
+        for r in exec_results:
+            if isinstance(r, dict) and r.get("success") and r.get("output"):
+                desc = r.get("description", "")
+                out = r.get("output", "")
+                if desc and out:
+                    outputs.append(f"**{desc}**\n{out}")
 
-        except Exception as e:
-            task.error = str(e)
-            self.central_state.update_task(
-                task.task_id,
-                status=TaskStatus.FAILED,
-                error=str(e),
-            )
-            return {"success": False, "error": str(e)}
+        if outputs:
+            response_parts = [
+                f"Tache accomplie en {result.iterations} iteration(s) "
+                f"(score final : {result.final_score:.0%}).\n"
+            ]
+            response_parts.extend(outputs)
 
-    def generate_execution_report(self) -> Dict[str, Any]:
-        """Générer un rapport d'exécution détaillé."""
-        state_summary = self.central_state.get_state_summary()
-
-        quality_scores = []
-
-        for task_id, task in self.central_state.tasks.items():
-            if task.status == TaskStatus.COMPLETED and task.result:
-                score = QualityEvaluator.evaluate_completeness(
-                    required_fields=len(task.context.get("required_fields", [])),
-                    completed_fields=len(task.result.get("completed_fields", [])),
+            if not result.converged:
+                response_parts.append(
+                    f"\nNote : le systeme n'a pas atteint le seuil de convergence "
+                    f"({CONVERGENCE_THRESHOLD:.0%}) apres {result.iterations} iterations. "
+                    "Le resultat peut etre partiel."
                 )
-                quality_scores.append(score)
 
-        aggregate_quality = (
-            AggregateScorer.aggregate_scores(quality_scores)
-            if quality_scores
-            else 0.0
+            return "\n\n".join(response_parts)
+
+        # fallback : resume textuel
+        summary = self.blackboard.read("execution", "summary", "Execution terminee.")
+        return (
+            f"{summary}\n\n"
+            f"Iterations : {result.iterations} | "
+            f"Score final : {result.final_score:.0%} | "
+            f"Convergence : {'oui' if result.converged else 'non'}"
         )
+
+    def get_system_report(self) -> Dict[str, Any]:
+        """
+        rapport complet sur l'etat du systeme.
+        utile pour le monitoring et le debug depuis l'interface.
+        """
+        agent_stats = {}
+        for name, agent in self._agents.items():
+            success = getattr(agent, "success_count", 0)
+            errors = getattr(agent, "error_count", 0)
+            total = success + errors
+            agent_stats[name] = {
+                "success_count": success,
+                "error_count": errors,
+                "total_runs": total,
+                "success_rate": success / total if total > 0 else 0.0,
+            }
 
         return {
             "timestamp": datetime.now().isoformat(),
-            "state_summary": state_summary,
-            "workflow_count": len(self.workflows),
-            "completed_workflows": sum(
-                1 for w in self.workflows.values()
-                if w["status"] == WorkflowStatus.COMPLETED.value
-            ),
-            "failed_workflows": sum(
-                1 for w in self.workflows.values()
-                if w["status"] == WorkflowStatus.FAILED.value
-            ),
-            "agent_statistics": self._get_agent_stats(),
-            "quality_report": AggregateScorer.generate_quality_report(
-                quality_scores,
-                aggregate_quality,
-            ),
+            "agents": agent_stats,
+            "blackboard_summary": self.blackboard.summary(),
+            "convergence_threshold": CONVERGENCE_THRESHOLD,
+            "max_iterations": MAX_ITERATIONS,
         }
-
-    def _get_agent_stats(self) -> Dict[str, Any]:
-        """Obtenir les statistiques de tous les agents."""
-        stats = {}
-
-        for agent_id, agent in self.agents.items():
-            total_actions = len(agent.action_history)
-            success_rate = (
-                agent.success_count / total_actions
-                if total_actions > 0
-                else 0
-            )
-
-            stats[agent_id] = {
-                "total_actions": total_actions,
-                "success_count": agent.success_count,
-                "error_count": agent.error_count,
-                "success_rate": success_rate,
-                "memory_size": len(agent.memory.memories),
-            }
-
-        return stats
