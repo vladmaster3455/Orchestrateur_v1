@@ -13,7 +13,7 @@ from agents.autonomous_email_agent import AutonomousEmailAgent
 from agents.autonomous_rag_agent import AutonomousRAGAgent
 from config import config
 
-
+# --- Streamlit Adapter for Advanced Orchestrator Test pour la conf dapres ----------------------------------
 class StreamlitOrchestratorAdapter:
     """
     Adaptateur pour intégrer l'orchestrateur avancé avec Streamlit.
