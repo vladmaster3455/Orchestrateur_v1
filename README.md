@@ -1,7 +1,7 @@
 # Multi-Agent Orchestrator 
 
 Projet d'orchestrateur multi-agents en Python pour mon Master. C'est fait pour tourner sur **Streamlit Cloud** et c'est full gratuit (pas besoin de sortir la CB).
-
+nb:code smell pas 100%  respecté à fond des regles solid
 ## C'est quoi le projet ?
 
 En gros, c'est un "cerveau" central  qui reçoit ton message et décide quel agent doit bosser. 
