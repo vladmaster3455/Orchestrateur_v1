@@ -42,7 +42,7 @@ if "pending_action" not in st.session_state:
 if "active_agent" not in st.session_state:
     st.session_state.active_agent = None  # L'orchestrateur décide automatiquement
 
-
+# --- Filter ajouter pour pas emoji du llm test à enlenver plus tard
 SYMBOL_FILTER_PATTERN = re.compile(
     "["
     "\U0001F300-\U0001F5FF"
