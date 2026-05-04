@@ -1,6 +1,6 @@
 # AISenghor - Orchestrateur Multi-Agents IA
 
-Projet fait dans le cadre de mon Master. C'est un orchestrateur multi-agents autonome en Python qui tourne sur Streamlit Cloud. Le but c'est pas juste un chatbot, c'est un vrai systeme ou plusieurs agents travaillent ensemble, se corrigent, et planifient des taches complexes.
+Projet fait dans le cadre de mon Master. C'est un orchestrateur multi-agents autonome en Python qui tourne sur Streamlit Cloud pour test . Le but c'est pas juste un chatbot, c'est un vrai systeme ou plusieurs agents travaillent ensemble, se corrigent, et planifient des taches complexes.
 
 ---
 
