@@ -15,6 +15,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+
 # --- Point d'entrée léger pour Cron Jobs (Keep-Alive) ---
 # URL à utiliser sur cron-job.org : https://votre-app.streamlit.app/?ping=1
 if st.query_params.get("ping") == "1":
